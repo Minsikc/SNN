@@ -1,0 +1,70 @@
+# Ablation Study Configuration for Basic_RSNN_spike
+
+# Experiment settings
+experiment:
+  type: "statistical_ablation"
+  name: "ablation_basic_rsnn_spike"
+  save_results: true
+  results_dir: "ablation_results"
+
+# Model parameters (base configuration)
+model:
+  type: "Basic_RSNN_spike"
+  n_in: 50
+  n_hidden: 40  # This will be varied in ablation
+  n_out: 10
+  neuron_type: "triangular"
+  recurrent: false
+
+# Neuron parameters (base configuration)
+neuron:
+  triangular:
+    thresh: 0.6  # This will be varied in ablation
+    subthresh: 0.25
+    gamma: 0.3
+    width: 1
+  boxcar:
+    thresh: 0.4
+    subthresh: 0.1
+    alpha: 1.0
+
+# Dataset parameters
+dataset:
+  type: "CustomSpikeDataset_random"
+  num_samples: 1
+  sequence_length: 100
+  spike_prob: 0.1
+
+# Training parameters (base configuration)
+training:
+  batch_size: 1
+  learning_rate: 0.1  # This will be varied in ablation
+  epochs: 50  # Reduced for faster ablation study
+  optimizer: "Adam"
+
+# Kernel parameters
+kernel:
+  size: 5
+  decay_rate: 2.0
+
+# Ablation study specific parameters
+ablation:
+  # Parameter ranges to test
+  learning_rates: [0.01, 0.05, 0.1, 0.2]
+  hidden_sizes: [20, 40, 80, 120]
+  neuron_thresholds: [0.4, 0.6, 0.8]
+  
+  # Statistical analysis settings
+  num_repetitions: 5  # Number of times to repeat each parameter combination
+  
+  # Analysis settings
+  confidence_level: 0.95
+  track_convergence: false  # Keep simple as requested
+
+# Logging and visualization
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"

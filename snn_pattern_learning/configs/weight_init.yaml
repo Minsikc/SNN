@@ -1,0 +1,58 @@
+# Weight initialization experiment configuration
+
+# Experiment settings
+experiment:
+  type: "weight_init"
+  name: "weight_init_experiment"
+  save_results: true
+  results_dir: "results/weight_init"
+
+# Model parameters
+model:
+  type: "Basic_RSNN_spike"
+  n_in: 50
+  n_hidden: 40
+  n_out: 10
+  neuron_type: "boxcar"
+
+# Neuron parameters
+neuron:
+  boxcar:
+    thresh: 0.4
+    subthresh: 0.1
+    alpha: 1.0
+
+# Dataset parameters
+dataset:
+  type: "CustomSpikeDataset_random"
+  num_samples: 1
+  sequence_length: 100
+  spike_prob: 0.1
+
+# Training parameters
+training:
+  batch_size: 1
+  learning_rate: 0.1
+  epochs: 200
+  optimizer: "Adam"
+
+# Kernel parameters
+kernel:
+  size: 5
+  decay_rate: 2.0
+
+# Logging and visualization
+logging:
+  enable_logger: true
+  enable_pattern_analyzer: false
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"
+
+# Weight initialization experiment specific
+weight_init:
+  methods: ["default"]
+  output_sizes: [10]
+  batch_mode: false
+  parallel: false
+  timeout: 300

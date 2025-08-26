@@ -1,0 +1,62 @@
+# Simple test configuration for ablation study
+
+# Experiment settings
+experiment:
+  type: "statistical_ablation"
+  name: "ablation_test"
+  save_results: true
+  results_dir: "ablation_results"
+
+# Model parameters (base configuration)
+model:
+  type: "Basic_RSNN_spike"
+  n_in: 20  # Reduced for faster testing
+  n_hidden: 10  # This will be varied in ablation
+  n_out: 5   # Reduced for faster testing
+  neuron_type: "triangular"
+  recurrent: false
+
+# Neuron parameters (base configuration)
+neuron:
+  triangular:
+    thresh: 0.6  # This will be varied in ablation
+    subthresh: 0.25
+    gamma: 0.3
+    width: 1
+
+# Dataset parameters
+dataset:
+  type: "CustomSpikeDataset_random"
+  num_samples: 1
+  sequence_length: 50  # Reduced for faster testing
+  spike_prob: 0.1
+
+# Training parameters (base configuration)
+training:
+  batch_size: 1
+  learning_rate: 0.1  # This will be varied in ablation
+  epochs: 10  # Very reduced for quick testing
+  optimizer: "Adam"
+
+# Kernel parameters
+kernel:
+  size: 3
+  decay_rate: 2.0
+
+# Ablation study specific parameters
+ablation:
+  # Parameter ranges to test (small for quick testing)
+  learning_rates: [0.05, 0.1]
+  hidden_sizes: [10, 20]
+  neuron_thresholds: [0.5, 0.7]
+  
+  # Statistical analysis settings
+  num_repetitions: 2  # Reduced for quick testing
+
+# Logging and visualization
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"

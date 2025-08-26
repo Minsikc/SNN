@@ -1,0 +1,71 @@
+# Default configuration for SNN experiments
+
+# Experiment settings
+experiment:
+  type: "basic"  # basic, teacher_student, weight_init, single_output
+  name: "default_experiment"
+  save_results: true
+  results_dir: "results"
+
+# Model parameters
+model:
+  type: "Basic_RSNN_spike"  # RSNN_eprop, Basic_RSNN_spike, etc.
+  n_in: 50
+  n_hidden: 40
+  n_out: 10
+  neuron_type: "triangular"  # triangular, boxcar
+  
+# Neuron parameters
+neuron:
+  triangular:
+    thresh: 0.6
+    subthresh: 0.25
+    gamma: 0.3
+    width: 1
+  boxcar:
+    thresh: 0.4
+    subthresh: 0.1
+    alpha: 1.0
+
+# Dataset parameters
+dataset:
+  type: "CustomSpikeDataset_random"  # CustomSpikeDataset_random, CustomSpikeDataset_Probabilistic, SuperSpikePatternDataset
+  num_samples: 1
+  sequence_length: 100
+  spike_prob: 0.1
+  total_spike: 5
+
+# Training parameters
+training:
+  batch_size: 1
+  learning_rate: 0.1
+  epochs: 200
+  optimizer: "Adam"
+
+# Kernel parameters
+kernel:
+  size: 5
+  decay_rate: 2.0
+
+# Logging and visualization
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"
+
+# Teacher-Student experiment specific
+teacher_student:
+  teacher_model_type: "Basic_RSNN_spike"
+  student_model_type: "Basic_RSNN_spike"
+  teacher_epochs: 100
+  student_epochs: 200
+  similarity_metric: "van_rossum"
+  
+# Weight initialization experiment specific
+weight_init:
+  methods: ["default", "xavier", "he", "random"]
+  output_sizes: [5, 10, 20]
+  batch_mode: false
+  parallel: false
