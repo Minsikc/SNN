@@ -60,7 +60,9 @@ class HeavisideBoxcarCall(nn.Module):
         else:
             self.f = self.primitive_function
 
-    def forward(self, x):
+    def forward(self, x, thresh=None):
+        if thresh is not None:
+            return self.f(x, thresh, self.subthresh)
         return self.f(x, self.thresh, self.subthresh)
 
     @staticmethod

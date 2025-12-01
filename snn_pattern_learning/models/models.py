@@ -7,10 +7,16 @@ import matplotlib.pyplot as plt
 import torch.nn.functional as F
 import torch.nn.init as init
 
-from aihwkit.nn import AnalogLinear
-from aihwkit.simulator.configs import SingleRPUConfig
-from aihwkit.simulator.configs.devices import ConstantStepDevice
-from aihwkit.simulator.tiles import AnalogTile
+try:
+    from aihwkit.nn import AnalogLinear
+    from aihwkit.simulator.configs import SingleRPUConfig
+    from aihwkit.simulator.configs.devices import ConstantStepDevice
+    from aihwkit.simulator.tiles import AnalogTile
+except ImportError:
+    AnalogLinear = None
+    SingleRPUConfig = None
+    ConstantStepDevice = None
+    AnalogTile = None
 
 class Basic_RSNN_BRP(nn.Module):
     def __init__(self, n_in=100, n_hidden=200, n_out=20, subthresh=0.5, init_tau=2.0, init_spk_trace_tau=0.5):
