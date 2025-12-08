@@ -136,9 +136,9 @@ def verify_gradients():
         print(f"Mean Ratio (Minsik/Forward): {ratio:.4f}")
 
         if diff_scaled < 1e-5:
-            print(f"✅ Gradients match (after scaling by {expected_ratio})")
+            print(f"[PASS] Gradients match (after scaling by {expected_ratio})")
         else:
-            print(f"❌ Gradients do not match exactly (after scaling)")
+            print(f"[FAIL] Gradients do not match exactly (after scaling)")
 
 if __name__ == "__main__":
     verify_gradients()

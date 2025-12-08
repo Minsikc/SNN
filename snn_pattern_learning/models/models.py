@@ -1608,3 +1608,365 @@ class Basic_RSNN_eprop_aihwkit(nn.Module):
         # Pseudo-derivative for spike generation (non-differentiability)
         # You can define it similar to the one in the paper (e.g., soft threshold function)
         return torch.max(torch.zeros_like(v_membrane), 1 - torch.abs(v_membrane - self.thr) / self.thr)
+
+
+class Basic_RSNN_eprop_HW_forward(nn.Module):
+    """
+    E-prop SNN model with hardware-accelerated output layer gradient computation.
+
+    This model uses a memristor crossbar array to compute the outer product
+    for the output layer gradients. The hardware accumulates gradients over
+    timesteps, and at epoch end, the accumulated gradient is read and applied
+    to the software weights.
+
+    Note: n_hidden and n_out must be 5 to match the 5x5 hardware array.
+    """
+
+    def __init__(
+        self,
+        n_in: int = 100,
+        n_hidden: int = 5,  # Must be 5 for 5x5 hardware
+        n_out: int = 5,     # Must be 5 for 5x5 hardware
+        subthresh: float = 0.5,
+        recurrent: bool = True,
+        init_tau: float = 0.60,
+        init_thresh: float = 0.6,
+        init_tau_o: float = 0.6,
+        gamma: float = 0.3,
+        width: int = 1,
+        # Hardware-specific parameters
+        hw_enabled: bool = True,
+        serial_port: str = 'COM7',
+        baud_rate: int = 115200,
+        bit_length: int = 10,
+        use_mock_hw: bool = False,
+        normalization_scale: float = 1.0,
+        adc_to_grad_scale: float = 0.001,
+    ):
+        super().__init__()
+
+        # Validate hardware constraints
+        if n_hidden != 5 or n_out != 5:
+            raise ValueError(
+                f"n_hidden and n_out must be 5 for 5x5 hardware. "
+                f"Got n_hidden={n_hidden}, n_out={n_out}"
+            )
+
+        self.n_in = n_in
+        self.n_hidden = n_hidden
+        self.n_out = n_out
+        self.subthresh = subthresh
+        self.init_tau = init_tau
+        self.tau_o = init_tau_o
+        self.recurrent_connection = recurrent
+        self.custom_grad = True
+        self.custom_grad_forward = True
+
+        self.gamma = gamma
+        self.width = width
+        self.thr = init_thresh
+
+        # Hardware settings
+        self.hw_enabled = hw_enabled
+        self.use_mock_hw = use_mock_hw
+        self.normalization_scale = normalization_scale
+        self.adc_to_grad_scale = adc_to_grad_scale
+
+        # Running max for normalization
+        self.running_max_err = 1e-8
+        self.running_max_trace = 1e-8
+
+        # Initialize hardware interface
+        if hw_enabled:
+            from snn_pattern_learning.hardware import MemristorInterface, MockMemristorInterface
+            if use_mock_hw:
+                self.hw_interface = MockMemristorInterface(
+                    port=serial_port,
+                    baud_rate=baud_rate,
+                    bit_length=bit_length
+                )
+            else:
+                self.hw_interface = MemristorInterface(
+                    port=serial_port,
+                    baud_rate=baud_rate,
+                    bit_length=bit_length
+                )
+        else:
+            self.hw_interface = None
+
+        # Network layers
+        self.fc1 = nn.Linear(self.n_in, self.n_hidden, bias=False)
+        init.kaiming_normal_(self.fc1.weight)
+        self.fc1.weight.data *= 0.5
+
+        self.recurrent = nn.Parameter(
+            torch.rand(self.n_hidden, self.n_hidden) / np.sqrt(self.n_hidden)
+        )
+        torch.nn.init.kaiming_normal_(self.recurrent)
+
+        self.out = nn.Linear(self.n_hidden, self.n_out, bias=False)
+        init.kaiming_normal_(self.out.weight)
+        self.out.weight.data *= 0.5
+
+        self.LIF0 = LIF_Node(surrogate_function=TriangleCall())
+        self.out_node = LIF_Node(surrogate_function=TriangleCall())
+        self.mask = torch.ones(self.n_hidden, self.n_hidden) - torch.eye(self.n_hidden)
+
+    def connect_hardware(self) -> bool:
+        """Connect to hardware. Call before training."""
+        if self.hw_interface is not None:
+            return self.hw_interface.connect()
+        return False
+
+    def disconnect_hardware(self):
+        """Disconnect from hardware. Call after training."""
+        if self.hw_interface is not None:
+            self.hw_interface.disconnect()
+
+    def reset_hardware(self) -> bool:
+        """Reset hardware state. Call at epoch start."""
+        if self.hw_interface is not None:
+            success = self.hw_interface.reset()
+            # Reset running normalization stats
+            self.running_max_err = 1e-8
+            self.running_max_trace = 1e-8
+            return success
+        return False
+
+    def init_net(self):
+        """Initialize gradient buffers."""
+        self.fc1.weight.grad = torch.zeros_like(self.fc1.weight)
+        self.recurrent.grad = torch.zeros_like(self.recurrent)
+        self.out.weight.grad = torch.zeros_like(self.out.weight)
+
+    def normalize_for_hardware(
+        self,
+        err: torch.Tensor,
+        trace_out_t: torch.Tensor
+    ) -> tuple:
+        """
+        Normalize err and trace_out_t to [0,1] probability range for hardware.
+
+        Args:
+            err: Error signal tensor of shape (batch, n_out)
+            trace_out_t: Eligibility trace tensor of shape (batch, n_hidden)
+
+        Returns:
+            Tuple of (err_probs, trace_probs, err_signs, trace_signs)
+            - err_probs: numpy array (n_out,) normalized to [0,1]
+            - trace_probs: numpy array (n_hidden,) normalized to [0,1]
+            - err_signs: tensor (n_out,) containing +1 or -1
+            - trace_signs: tensor (n_hidden,) containing +1 or -1
+        """
+        # Average across batch
+        err_avg = err.mean(dim=0).detach()  # (n_out,)
+        trace_avg = trace_out_t.mean(dim=0).detach()  # (n_hidden,)
+
+        # Extract signs for direction determination
+        err_signs = torch.sign(err_avg)
+        trace_signs = torch.sign(trace_avg)
+
+        # Handle zero values (default to positive)
+        err_signs[err_signs == 0] = 1
+        trace_signs[trace_signs == 0] = 1
+
+        # Take absolute values
+        err_abs = torch.abs(err_avg)
+        trace_abs = torch.abs(trace_avg)
+
+        # Update running max
+        self.running_max_err = max(self.running_max_err, err_abs.max().item())
+        self.running_max_trace = max(self.running_max_trace, trace_abs.max().item())
+
+        # Normalize to [0, 1]
+        err_probs = (err_abs / self.running_max_err).clamp(0, 1)
+        trace_probs = (trace_abs / self.running_max_trace).clamp(0, 1)
+
+        # Apply scaling factor
+        err_probs = err_probs * self.normalization_scale
+        trace_probs = trace_probs * self.normalization_scale
+
+        return (
+            err_probs.cpu().numpy(),
+            trace_probs.cpu().numpy(),
+            err_signs,
+            trace_signs
+        )
+
+    def send_to_hardware(
+        self,
+        err: torch.Tensor,
+        trace_out_t: torch.Tensor
+    ):
+        """
+        Send vectors to hardware for outer product computation.
+
+        Decomposes the update into POTENTIATION and DEPRESSION based on signs.
+
+        Args:
+            err: Error signal tensor of shape (batch, n_out)
+            trace_out_t: Eligibility trace tensor of shape (batch, n_hidden)
+        """
+        if self.hw_interface is None:
+            return
+
+        err_probs, trace_probs, err_signs, trace_signs = self.normalize_for_hardware(
+            err, trace_out_t
+        )
+
+        # Compute sign matrix for outer product
+        # sign_matrix[o, r] = sign(err[o]) * sign(trace[r])
+        sign_matrix = torch.outer(err_signs, trace_signs)  # (n_out, n_hidden)
+
+        # Count positive and negative elements
+        pos_count = (sign_matrix > 0).sum().item()
+        neg_count = (sign_matrix < 0).sum().item()
+
+        # Send POTENTIATION update for positive elements
+        if pos_count > 0:
+            self.hw_interface.send_outer_product_update(
+                err_probs,
+                trace_probs,
+                direction='POTENTIATION'
+            )
+
+        # Send DEPRESSION update for negative elements
+        # For depression, we need to invert the signs conceptually
+        if neg_count > 0:
+            # Apply sign adjustment for depression
+            err_probs_neg = err_probs.copy()
+            trace_probs_neg = trace_probs.copy()
+
+            # Where err_sign is negative, use those values for depression
+            for i in range(len(err_signs)):
+                if err_signs[i] < 0:
+                    err_probs_neg[i] = err_probs[i]
+                else:
+                    err_probs_neg[i] = 0
+
+            self.hw_interface.send_outer_product_update(
+                err_probs_neg,
+                trace_probs,
+                direction='DEPRESSION'
+            )
+
+    def forward(self, x, label, training):
+        """
+        Forward pass with optional hardware gradient accumulation.
+
+        Args:
+            x: Input tensor of shape (batch, time, n_in)
+            label: Target tensor of shape (batch, time, n_out)
+            training: Whether in training mode
+
+        Returns:
+            Output spike tensor of shape (batch, time, n_out)
+        """
+        self.device = x.device
+        self.init_net()
+
+        self.hidden_mem_list = []
+        self.hidden_spike_list = []
+        self.outputs = []
+
+        num_steps = x.size(1)
+        batch_size = x.size(0)
+
+        hidden_mem = hidden_spike = torch.zeros(batch_size, self.n_hidden, device=self.device)
+        out_mem = out_spike = torch.zeros(batch_size, self.n_out, device=self.device)
+
+        trace_in_v = torch.zeros(batch_size, self.n_in, device=self.device)
+        trace_rec_v = torch.zeros(batch_size, self.n_hidden, device=self.device)
+        trace_out_t = torch.zeros(batch_size, self.n_hidden, device=self.device)
+
+        for step in range(num_steps):
+            input_spike = x[:, step, :]
+
+            # Hidden layer dynamics
+            if self.recurrent_connection:
+                hidden_input = self.fc1(input_spike) + torch.mm(hidden_spike, self.recurrent)
+            else:
+                hidden_input = self.fc1(input_spike)
+
+            hidden_mem, hidden_spike = self.LIF0(
+                hidden_mem, hidden_spike, self.init_tau, hidden_input
+            )
+
+            # Output layer dynamics
+            out_mem, out_spike = self.out_node(
+                out_mem, out_spike, self.init_tau, self.out(hidden_spike)
+            )
+
+            # Error signal
+            err = out_spike - label[:, step, :]
+
+            # Update eligibility traces
+            trace_in_v = self.init_tau * trace_in_v + input_spike
+            trace_rec_v = self.init_tau * trace_rec_v + hidden_spike
+            trace_out_t = self.tau_o * trace_out_t + hidden_spike
+
+            # Surrogate derivative
+            h_t = self.gamma * torch.max(
+                torch.zeros_like(hidden_mem),
+                1 - torch.abs((hidden_mem - self.thr) / self.thr)
+            )
+
+            # Compute eligibility traces for hidden layers
+            trace_in = torch.einsum('br,bi->bri', h_t, trace_in_v)
+            trace_rec = torch.einsum('br,bi->bri', h_t, trace_rec_v)
+
+            # Learning signal for hidden layers
+            L = torch.einsum('bo,or->br', err, self.out.weight)
+
+            # Hidden layer gradients (always software)
+            self.fc1.weight.grad += 0.01 * torch.sum(L.unsqueeze(2) * trace_in, dim=0)
+            self.recurrent.grad += 0.01 * torch.sum(L.unsqueeze(2) * trace_rec, dim=0)
+
+            # Output layer gradient
+            if training and self.hw_enabled and self.hw_interface is not None:
+                # Send to hardware for outer product computation
+                self.send_to_hardware(err, trace_out_t)
+            else:
+                # Software fallback
+                self.out.weight.grad += 0.01 * torch.einsum('bo,br->or', err, trace_out_t)
+
+            self.outputs.append(out_spike)
+            self.hidden_mem_list.append(hidden_mem)
+            self.hidden_spike_list.append(hidden_spike)
+
+        return torch.stack(self.outputs, dim=1)
+
+    def apply_hw_gradient(self, learning_rate: float = 0.01):
+        """
+        Apply accumulated hardware gradient to output weights.
+
+        Call at the end of each epoch to:
+        1. Read accumulated gradient from hardware
+        2. Convert ADC values to gradient scale
+        3. Apply to software weights
+
+        Args:
+            learning_rate: Learning rate for weight update
+        """
+        if not self.hw_enabled or self.hw_interface is None:
+            return
+
+        # Read accumulated gradient from hardware
+        hw_gradient_adc = self.hw_interface.read_accumulated_gradient()  # (5, 5)
+
+        # Convert ADC to gradient scale
+        hw_gradient = torch.tensor(
+            hw_gradient_adc * self.adc_to_grad_scale,
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        # Apply to software weights (gradient descent)
+        with torch.no_grad():
+            self.out.weight.data -= learning_rate * hw_gradient
+
+    def get_hw_gradient(self) -> np.ndarray:
+        """Get the current accumulated gradient from hardware (for debugging)."""
+        if self.hw_interface is not None:
+            return self.hw_interface.read_accumulated_gradient()
+        return np.zeros((5, 5))

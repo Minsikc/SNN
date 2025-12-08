@@ -19,6 +19,7 @@ class BasicExperiment(BaseExperiment):
         
         # Create dataset and dataloader
         dataset = self.create_dataset()
+        
         dataloader = DataLoader(
             dataset, 
             batch_size=self.config.get('training.batch_size', 1), 
@@ -44,6 +45,7 @@ class BasicExperiment(BaseExperiment):
             train_loss, outputs, targets, inputs = self.train_epoch(
                 model, dataloader, loss_fn, optimizer, kernel, kernel_size
             )
+
             
             val_metric, val_metric_per_spike, normalized_distance_per_spike = self.evaluate(
                 model, dataloader, van_rossum_distance, kernel, kernel_size
@@ -60,6 +62,7 @@ class BasicExperiment(BaseExperiment):
                   f"Normalized Per Spike: {normalized_distance_per_spike:.4f}")
         
         # Save results
+        print(inputs.shape)
         self.save_results()
         
         # Visualize results

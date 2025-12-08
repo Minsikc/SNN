@@ -3,7 +3,8 @@ import torch.nn as nn
 import copy
 from .models import (
     Basic_RSNN_spike, Basic_RSNN_eprop_minsik, Basic_RSNN_eprop_forward,
-    Basic_RSNN_eprop_analog_forward, RSNN_merged_hidden_output, RSNN_fixed_w_in
+    Basic_RSNN_eprop_analog_forward, RSNN_merged_hidden_output, RSNN_fixed_w_in,
+    Basic_RSNN_eprop_HW_forward
 )
 from neurons import HeavisideBoxcarCall, TriangleCall, LIF_Node
 
@@ -110,9 +111,23 @@ def create_model(model_type, model_config, neuron_type=None, neuron_config=None)
         )
     elif model_type == "RSNN_fixed_w_in":
         model = RSNN_fixed_w_in(
-            n_in=n_in, 
-            n_hidden=n_hidden, 
+            n_in=n_in,
+            n_hidden=n_hidden,
             n_out=n_out
+        )
+    elif model_type == "RSNN_eprop_HW_forward":
+        # Hardware-integrated model - requires special handling
+        hw_config = model_config.get('hardware', {})
+        model = Basic_RSNN_eprop_HW_forward(
+            n_in=n_in,
+            n_hidden=n_hidden,  # Must be 5 for hardware
+            n_out=n_out,        # Must be 5 for hardware
+            recurrent=model_config.get('recurrent', True),
+            hw_enabled=hw_config.get('enabled', True),
+            serial_port=hw_config.get('serial_port', 'COM7'),
+            baud_rate=hw_config.get('baud_rate', 115200),
+            bit_length=hw_config.get('bit_length', 10),
+            use_mock_hw=hw_config.get('use_mock', False),
         )
     else:
         raise ValueError(f"Unsupported model type: {model_type}")

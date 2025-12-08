@@ -12,7 +12,7 @@ from models.loss import mse_acc_loss_over_time
 from utils.metrics import van_rossum_distance, max_van_rossum_distance
 from utils.kernels import create_exponential_kernel
 from utils.kernel_convolution import apply_convolution
-from utils.plots import plot_raster, plot_comparison_raster, plot_spike_trains
+from utils.plots import plot_raster, plot_comparison_raster
 from datasets.customdatasets import (
     CustomSpikeDataset_random, SuperSpikePatternDataset, 
     CustomSpikeDataset_Probabilistic
@@ -221,9 +221,6 @@ class BaseExperiment(ABC):
                 plt.show()
             
             plt.close()
-            
-            # Spike trains comparison
-            plot_spike_trains(outputs, targets, epoch=self.config.get('training.epochs', 200))
     
     @abstractmethod
     def run(self):
