@@ -15,6 +15,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from configs.config_loader import load_config, get_available_configs
 from experiment_types import BasicExperiment, TeacherStudentExperiment, WeightInitExperiment, StatisticalAblationExperiment
+from experiment_types.classification_experiment import ClassificationExperiment
 
 
 def parse_arguments():
@@ -23,8 +24,8 @@ def parse_arguments():
     
     parser.add_argument('--config', type=str, default='default.yaml',
                        help='Configuration file name (default: default.yaml)')
-    parser.add_argument('--experiment_type', type=str, 
-                       choices=['basic', 'teacher_student', 'weight_init', 'statistical_ablation'],
+    parser.add_argument('--experiment_type', type=str,
+                       choices=['basic', 'teacher_student', 'weight_init', 'statistical_ablation', 'classification'],
                        help='Override experiment type from config')
     parser.add_argument('--name', type=str, help='Override experiment name')
     parser.add_argument('--epochs', type=int, help='Override number of epochs')
@@ -70,6 +71,8 @@ def create_experiment(config):
         return WeightInitExperiment(config)
     elif experiment_type == 'statistical_ablation':
         return StatisticalAblationExperiment(config)
+    elif experiment_type == 'classification':
+        return ClassificationExperiment(config)
     else:
         raise ValueError(f"Unsupported experiment type: {experiment_type}")
 

@@ -2,6 +2,13 @@ from torch.utils.data import Dataset
 import torch
 import numpy as np
 
+try:
+    import tonic
+    import tonic.transforms as transforms
+    TONIC_AVAILABLE = True
+except ImportError:
+    TONIC_AVAILABLE = False
+
 class CustomSpikeDataset(Dataset):
     def __init__(self, num_samples=1000, sequence_length=50, input_size=100, output_size=2, spike_prob=0.05):
         super().__init__()
@@ -229,3 +236,395 @@ class SuperSpikePatternDataset(Dataset):
         # 입력 데이터는 항상 동일한 고정된 패턴을 반환하고,
         # 목표 데이터는 해당 인덱스의 패턴을 반환합니다.
         return self.data, self.targets[idx]
+
+
+# --- N-MNIST Dataset ---
+# Two implementations: one using tonic (if available), one standalone
+
+class NMNISTDataset(Dataset):
+    """
+    N-MNIST (Neuromorphic MNIST) dataset wrapper.
+
+    Uses tonic library if available, otherwise provides instructions for manual setup.
+
+    Args:
+        root (str): Root directory for dataset storage
+        train (bool): If True, use training set, else test set
+        time_window (float): Time window in microseconds for binning events (default: 1000 = 1ms)
+        num_time_bins (int): Number of time bins for the output tensor
+        flatten (bool): If True, flatten spatial dimensions (34x34x2 -> 2312)
+        max_samples (int): Maximum number of samples to use (None for all)
+        transform: Additional transforms to apply
+    """
+
+    def __init__(
+        self,
+        root: str = './data/nmnist',
+        train: bool = True,
+        time_window: float = 1000.0,
+        num_time_bins: int = 300,
+        flatten: bool = True,
+        max_samples: int = None,
+        transform = None
+    ):
+        super().__init__()
+
+        self.root = root
+        self.train = train
+        self.time_window = time_window
+        self.num_time_bins = num_time_bins
+        self.flatten = flatten
+        self.max_samples = max_samples
+        self.additional_transform = transform
+        self.sensor_size = (34, 34, 2)
+
+        if flatten:
+            self.input_size = 34 * 34 * 2  # 2312
+        else:
+            self.input_size = (2, 34, 34)
+
+        if TONIC_AVAILABLE:
+            self._init_with_tonic()
+        else:
+            self._init_standalone()
+
+    def _init_with_tonic(self):
+        """Initialize using tonic library."""
+        frame_transform = transforms.ToFrame(
+            sensor_size=self.sensor_size,
+            time_window=self.time_window
+        )
+        self.dataset = tonic.datasets.NMNIST(
+            save_to=self.root,
+            train=self.train,
+            transform=frame_transform
+        )
+        self.use_tonic = True
+
+    def _init_standalone(self):
+        """Initialize without tonic - uses pre-processed data."""
+        import os
+
+        # Check for pre-processed data
+        split = 'train' if self.train else 'test'
+        data_file = os.path.join(self.root, f'nmnist_{split}_frames.pt')
+        label_file = os.path.join(self.root, f'nmnist_{split}_labels.pt')
+
+        if os.path.exists(data_file) and os.path.exists(label_file):
+            self.frames_data = torch.load(data_file)
+            self.labels_data = torch.load(label_file)
+            self.use_tonic = False
+        else:
+            raise ImportError(
+                f"tonic library is not available and pre-processed data not found.\n"
+                f"Please either:\n"
+                f"1. Install tonic: pip install tonic\n"
+                f"2. Or provide pre-processed data at:\n"
+                f"   - {data_file}\n"
+                f"   - {label_file}"
+            )
+
+    def __len__(self):
+        if self.use_tonic:
+            length = len(self.dataset)
+        else:
+            length = len(self.labels_data)
+
+        if self.max_samples is not None:
+            return min(self.max_samples, length)
+        return length
+
+    def __getitem__(self, idx):
+        if self.use_tonic:
+            frames, label = self.dataset[idx]
+        else:
+            frames = self.frames_data[idx].numpy()
+            label = self.labels_data[idx].item()
+
+        # Pad or truncate to num_time_bins
+        num_frames = frames.shape[0]
+
+        if num_frames < self.num_time_bins:
+            padding = np.zeros((self.num_time_bins - num_frames, *frames.shape[1:]))
+            frames = np.concatenate([frames, padding], axis=0)
+        elif num_frames > self.num_time_bins:
+            frames = frames[:self.num_time_bins]
+
+        data = torch.from_numpy(frames).float()
+
+        if self.flatten:
+            data = data.view(self.num_time_bins, -1)
+
+        data = (data > 0).float()
+
+        if self.additional_transform is not None:
+            data = self.additional_transform(data)
+
+        # One-hot target at last timestep
+        num_classes = 10
+        target = torch.zeros(self.num_time_bins, num_classes)
+        target[-1, label] = 1.0
+
+        return data, target
+
+    def get_class_label(self, idx):
+        """Get the integer class label for a sample."""
+        if self.use_tonic:
+            _, label = self.dataset[idx]
+        else:
+            label = self.labels_data[idx].item()
+        return label
+
+
+class NMNISTDatasetClassification(Dataset):
+    """
+    N-MNIST dataset for classification tasks.
+
+    Returns integer labels instead of one-hot encoded targets,
+    suitable for use with CrossEntropyLoss.
+
+    Args:
+        root (str): Root directory for dataset storage
+        train (bool): If True, use training set, else test set
+        time_window (float): Time window in microseconds for binning
+        num_time_bins (int): Number of time bins
+        flatten (bool): Flatten spatial dimensions
+        max_samples (int): Maximum samples
+    """
+
+    def __init__(
+        self,
+        root: str = './data/nmnist',
+        train: bool = True,
+        time_window: float = 1000.0,
+        num_time_bins: int = 300,
+        flatten: bool = True,
+        max_samples: int = None,
+        transform = None
+    ):
+        super().__init__()
+
+        self.root = root
+        self.train = train
+        self.time_window = time_window
+        self.num_time_bins = num_time_bins
+        self.flatten = flatten
+        self.max_samples = max_samples
+        self.additional_transform = transform
+        self.sensor_size = (34, 34, 2)
+
+        if flatten:
+            self.input_size = 34 * 34 * 2  # 2312
+        else:
+            self.input_size = (2, 34, 34)
+
+        if TONIC_AVAILABLE:
+            self._init_with_tonic()
+        else:
+            self._init_standalone()
+
+    def _init_with_tonic(self):
+        """Initialize using tonic library."""
+        frame_transform = transforms.ToFrame(
+            sensor_size=self.sensor_size,
+            time_window=self.time_window
+        )
+        self.dataset = tonic.datasets.NMNIST(
+            save_to=self.root,
+            train=self.train,
+            transform=frame_transform
+        )
+        self.use_tonic = True
+
+    def _init_standalone(self):
+        """Initialize without tonic - uses pre-processed data."""
+        import os
+
+        split = 'train' if self.train else 'test'
+        data_file = os.path.join(self.root, f'nmnist_{split}_frames.pt')
+        label_file = os.path.join(self.root, f'nmnist_{split}_labels.pt')
+
+        if os.path.exists(data_file) and os.path.exists(label_file):
+            self.frames_data = torch.load(data_file)
+            self.labels_data = torch.load(label_file)
+            self.use_tonic = False
+        else:
+            raise ImportError(
+                f"tonic library is not available and pre-processed data not found.\n"
+                f"Please either:\n"
+                f"1. Install tonic: pip install tonic\n"
+                f"2. Or provide pre-processed data at:\n"
+                f"   - {data_file}\n"
+                f"   - {label_file}"
+            )
+
+    def __len__(self):
+        if self.use_tonic:
+            length = len(self.dataset)
+        else:
+            length = len(self.labels_data)
+
+        if self.max_samples is not None:
+            return min(self.max_samples, length)
+        return length
+
+    def __getitem__(self, idx):
+        if self.use_tonic:
+            frames, label = self.dataset[idx]
+        else:
+            frames = self.frames_data[idx].numpy()
+            label = self.labels_data[idx].item()
+
+        # Pad or truncate to num_time_bins
+        num_frames = frames.shape[0]
+
+        if num_frames < self.num_time_bins:
+            padding = np.zeros((self.num_time_bins - num_frames, *frames.shape[1:]))
+            frames = np.concatenate([frames, padding], axis=0)
+        elif num_frames > self.num_time_bins:
+            frames = frames[:self.num_time_bins]
+
+        data = torch.from_numpy(frames).float()
+
+        if self.flatten:
+            data = data.view(self.num_time_bins, -1)
+
+        # Binarize to spikes
+        data = (data > 0).float()
+
+        if self.additional_transform is not None:
+            data = self.additional_transform(data)
+
+        # Return integer label for classification
+        return data, label
+
+
+class NMNISTDatasetRateEncoded(Dataset):
+    """
+    N-MNIST dataset with rate-based target encoding.
+
+    Instead of a single spike at the last timestep, this version
+    produces a sustained output for the correct class over the
+    last portion of the sequence.
+
+    Args:
+        root (str): Root directory for dataset storage
+        train (bool): If True, use training set, else test set
+        time_window (float): Time window in microseconds for binning
+        num_time_bins (int): Number of time bins
+        flatten (bool): Flatten spatial dimensions
+        max_samples (int): Maximum samples
+        output_duration (int): Number of timesteps at the end to have output
+        output_spike_prob (float): Probability of spike in output window
+    """
+
+    def __init__(
+        self,
+        root: str = './data/nmnist',
+        train: bool = True,
+        time_window: float = 1000.0,
+        num_time_bins: int = 300,
+        flatten: bool = True,
+        max_samples: int = None,
+        output_duration: int = 50,
+        output_spike_prob: float = 0.1
+    ):
+        super().__init__()
+
+        self.root = root
+        self.train = train
+        self.time_window = time_window
+        self.num_time_bins = num_time_bins
+        self.flatten = flatten
+        self.max_samples = max_samples
+        self.output_duration = output_duration
+        self.output_spike_prob = output_spike_prob
+        self.sensor_size = (34, 34, 2)
+
+        if flatten:
+            self.input_size = 34 * 34 * 2
+        else:
+            self.input_size = (2, 34, 34)
+
+        if TONIC_AVAILABLE:
+            self._init_with_tonic()
+        else:
+            self._init_standalone()
+
+    def _init_with_tonic(self):
+        """Initialize using tonic library."""
+        frame_transform = transforms.ToFrame(
+            sensor_size=self.sensor_size,
+            time_window=self.time_window
+        )
+        self.dataset = tonic.datasets.NMNIST(
+            save_to=self.root,
+            train=self.train,
+            transform=frame_transform
+        )
+        self.use_tonic = True
+
+    def _init_standalone(self):
+        """Initialize without tonic - uses pre-processed data."""
+        import os
+
+        split = 'train' if self.train else 'test'
+        data_file = os.path.join(self.root, f'nmnist_{split}_frames.pt')
+        label_file = os.path.join(self.root, f'nmnist_{split}_labels.pt')
+
+        if os.path.exists(data_file) and os.path.exists(label_file):
+            self.frames_data = torch.load(data_file)
+            self.labels_data = torch.load(label_file)
+            self.use_tonic = False
+        else:
+            raise ImportError(
+                f"tonic library is not available and pre-processed data not found.\n"
+                f"Please either:\n"
+                f"1. Install tonic: pip install tonic\n"
+                f"2. Or provide pre-processed data at:\n"
+                f"   - {data_file}\n"
+                f"   - {label_file}"
+            )
+
+    def __len__(self):
+        if self.use_tonic:
+            length = len(self.dataset)
+        else:
+            length = len(self.labels_data)
+
+        if self.max_samples is not None:
+            return min(self.max_samples, length)
+        return length
+
+    def __getitem__(self, idx):
+        if self.use_tonic:
+            frames, label = self.dataset[idx]
+        else:
+            frames = self.frames_data[idx].numpy()
+            label = self.labels_data[idx].item()
+
+        num_frames = frames.shape[0]
+
+        if num_frames < self.num_time_bins:
+            padding = np.zeros((self.num_time_bins - num_frames, *frames.shape[1:]))
+            frames = np.concatenate([frames, padding], axis=0)
+        elif num_frames > self.num_time_bins:
+            frames = frames[:self.num_time_bins]
+
+        data = torch.from_numpy(frames).float()
+
+        if self.flatten:
+            data = data.view(self.num_time_bins, -1)
+
+        data = (data > 0).float()
+
+        # Rate-encoded target
+        num_classes = 10
+        target = torch.zeros(self.num_time_bins, num_classes)
+
+        start_idx = self.num_time_bins - self.output_duration
+        for t in range(start_idx, self.num_time_bins):
+            if torch.rand(1).item() < self.output_spike_prob:
+                target[t, label] = 1.0
+
+        return data, target

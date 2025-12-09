@@ -14,8 +14,9 @@ from utils.kernels import create_exponential_kernel
 from utils.kernel_convolution import apply_convolution
 from utils.plots import plot_raster, plot_comparison_raster
 from datasets.customdatasets import (
-    CustomSpikeDataset_random, SuperSpikePatternDataset, 
-    CustomSpikeDataset_Probabilistic
+    CustomSpikeDataset_random, SuperSpikePatternDataset,
+    CustomSpikeDataset_Probabilistic, NMNISTDataset, NMNISTDatasetRateEncoded,
+    NMNISTDatasetClassification
 )
 
 
@@ -55,10 +56,17 @@ class BaseExperiment(ABC):
         return model.to(self.device)
     
     
-    def create_dataset(self):
-        """Create dataset based on configuration"""
+    def create_dataset(self, train=None):
+        """Create dataset based on configuration
+
+        Args:
+            train: Override train/test split. If None, uses config value.
+        """
         dataset_type = self.config.get('dataset.type')
-        
+
+        # Use provided train parameter or fall back to config
+        is_train = train if train is not None else self.config.get('dataset.train', True)
+
         if dataset_type == "CustomSpikeDataset_random":
             return CustomSpikeDataset_random(
                 num_samples=self.config.get('dataset.num_samples', 1),
@@ -83,6 +91,35 @@ class BaseExperiment(ABC):
                 input_size=self.config.get('model.n_in', 50),
                 output_size=self.config.get('model.n_out', 10),
                 input_spike_prob=self.config.get('dataset.spike_prob', 0.1)
+            )
+        elif dataset_type == "NMNISTDataset":
+            return NMNISTDataset(
+                root=self.config.get('dataset.root', './data/nmnist'),
+                train=is_train,
+                time_window=self.config.get('dataset.time_window', 1000.0),
+                num_time_bins=self.config.get('dataset.sequence_length', 300),
+                flatten=self.config.get('dataset.flatten', True),
+                max_samples=self.config.get('dataset.max_samples', None)
+            )
+        elif dataset_type == "NMNISTDatasetRateEncoded":
+            return NMNISTDatasetRateEncoded(
+                root=self.config.get('dataset.root', './data/nmnist'),
+                train=is_train,
+                time_window=self.config.get('dataset.time_window', 1000.0),
+                num_time_bins=self.config.get('dataset.sequence_length', 300),
+                flatten=self.config.get('dataset.flatten', True),
+                max_samples=self.config.get('dataset.max_samples', None),
+                output_duration=self.config.get('dataset.output_duration', 50),
+                output_spike_prob=self.config.get('dataset.output_spike_prob', 0.1)
+            )
+        elif dataset_type == "NMNISTDatasetClassification":
+            return NMNISTDatasetClassification(
+                root=self.config.get('dataset.root', './data/nmnist'),
+                train=is_train,
+                time_window=self.config.get('dataset.time_window', 1000.0),
+                num_time_bins=self.config.get('dataset.sequence_length', 300),
+                flatten=self.config.get('dataset.flatten', True),
+                max_samples=self.config.get('dataset.max_samples', None)
             )
         else:
             raise ValueError(f"Unsupported dataset type: {dataset_type}")
