@@ -7,11 +7,13 @@ from experiment_types.basic_experiment import BasicExperiment
 from experiment_types.teacher_student_experiment import TeacherStudentExperiment
 from experiment_types.weight_init_experiment import WeightInitExperiment
 from experiment_types.statistical_ablation_experiment import StatisticalAblationExperiment
+from experiment_types.classification_experiment import ClassificationExperiment
 
 __all__ = [
     'BaseExperiment',
-    'BasicExperiment', 
+    'BasicExperiment',
     'TeacherStudentExperiment',
     'WeightInitExperiment',
-    'StatisticalAblationExperiment'
+    'StatisticalAblationExperiment',
+    'ClassificationExperiment'
 ]

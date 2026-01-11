@@ -390,6 +390,7 @@ class NMNISTDatasetClassification(Dataset):
         num_time_bins (int): Number of time bins
         flatten (bool): Flatten spatial dimensions
         max_samples (int): Maximum samples
+        shuffle (bool): If True, shuffle indices to get balanced class distribution
     """
 
     def __init__(
@@ -400,7 +401,8 @@ class NMNISTDatasetClassification(Dataset):
         num_time_bins: int = 300,
         flatten: bool = True,
         max_samples: int = None,
-        transform = None
+        transform = None,
+        shuffle: bool = True
     ):
         super().__init__()
 
@@ -412,6 +414,7 @@ class NMNISTDatasetClassification(Dataset):
         self.max_samples = max_samples
         self.additional_transform = transform
         self.sensor_size = (34, 34, 2)
+        self.shuffle = shuffle
 
         if flatten:
             self.input_size = 34 * 34 * 2  # 2312
@@ -422,6 +425,9 @@ class NMNISTDatasetClassification(Dataset):
             self._init_with_tonic()
         else:
             self._init_standalone()
+
+        # Create shuffled indices for balanced class sampling
+        self._create_indices()
 
     def _init_with_tonic(self):
         """Initialize using tonic library."""
@@ -458,22 +464,36 @@ class NMNISTDatasetClassification(Dataset):
                 f"   - {label_file}"
             )
 
-    def __len__(self):
+    def _create_indices(self):
+        """Create shuffled indices for balanced class sampling."""
         if self.use_tonic:
-            length = len(self.dataset)
+            total_len = len(self.dataset)
         else:
-            length = len(self.labels_data)
+            total_len = len(self.labels_data)
 
+        if self.shuffle:
+            # Create shuffled indices with fixed seed for reproducibility
+            rng = np.random.RandomState(42)
+            self.indices = rng.permutation(total_len)
+        else:
+            self.indices = np.arange(total_len)
+
+        # Apply max_samples limit after shuffling
         if self.max_samples is not None:
-            return min(self.max_samples, length)
-        return length
+            self.indices = self.indices[:self.max_samples]
+
+    def __len__(self):
+        return len(self.indices)
 
     def __getitem__(self, idx):
+        # Map to shuffled index
+        real_idx = self.indices[idx]
+
         if self.use_tonic:
-            frames, label = self.dataset[idx]
+            frames, label = self.dataset[real_idx]
         else:
-            frames = self.frames_data[idx].numpy()
-            label = self.labels_data[idx].item()
+            frames = self.frames_data[real_idx].numpy()
+            label = self.labels_data[real_idx].item()
 
         # Pad or truncate to num_time_bins
         num_frames = frames.shape[0]

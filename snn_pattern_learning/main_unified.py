@@ -14,8 +14,13 @@ from pathlib import Path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from configs.config_loader import load_config, get_available_configs
-from experiment_types import BasicExperiment, TeacherStudentExperiment, WeightInitExperiment, StatisticalAblationExperiment
-from experiment_types.classification_experiment import ClassificationExperiment
+from experiment_types import (
+    BasicExperiment,
+    TeacherStudentExperiment,
+    WeightInitExperiment,
+    StatisticalAblationExperiment,
+    ClassificationExperiment
+)
 
 
 def parse_arguments():

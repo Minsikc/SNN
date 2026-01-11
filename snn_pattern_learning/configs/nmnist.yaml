@@ -1,0 +1,58 @@
+# N-MNIST dataset configuration
+
+# Experiment settings
+experiment:
+  type: "basic"
+  name: "nmnist_experiment"
+  save_results: true
+  results_dir: "results"
+
+# Model parameters - adjusted for N-MNIST (input_size: 34*34*2 = 2312, output: 10 classes)
+model:
+  type: "Basic_RSNN_spike"
+  n_in: 2312
+  n_hidden: 128
+  n_out: 10
+  neuron_type: "triangular"
+
+# Neuron parameters
+neuron:
+  triangular:
+    thresh: 0.6
+    subthresh: 0.25
+    gamma: 0.3
+    width: 1
+  boxcar:
+    thresh: 0.4
+    subthresh: 0.1
+    alpha: 1.0
+
+# Dataset parameters
+dataset:
+  type: "NMNISTDataset"
+  root: "./data"
+  train: true
+  time_window: 1000.0
+  sequence_length: 100
+  flatten: true
+  max_samples: 1000
+
+# Training parameters
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  epochs: 10
+  optimizer: "Adam"
+
+# Kernel parameters
+kernel:
+  size: 5
+  decay_rate: 2.0
+
+# Logging and visualization
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"
