@@ -10,7 +10,7 @@ except ImportError:
     TONIC_AVAILABLE = False
 
 class CustomSpikeDataset(Dataset):
-    def __init__(self, num_samples=1000, sequence_length=50, input_size=100, output_size=2, spike_prob=0.05):
+    def __init__(self, num_samples=1000, sequence_length=50, input_size=100, output_size=2, spike_prob=0.05, seed=None):
         super().__init__()
         self.num_samples = num_samples
         self.sequence_length = sequence_length
@@ -19,14 +19,21 @@ class CustomSpikeDataset(Dataset):
         self.spike_prob = spike_prob
         period_range = (3,15)
 
+        # 로컬 Generator 생성 (전역 seed에 영향 없음)
+        if seed is not None:
+            generator = torch.Generator()
+            generator.manual_seed(seed)
+        else:
+            generator = None
+
         # 스파이크 확률을 기반으로 0 또는 1의 값을 갖는 스파이크 데이터 생성
-        self.data = (torch.rand(num_samples, sequence_length, input_size) < 0.05).float()
+        self.data = (torch.rand(num_samples, sequence_length, input_size, generator=generator) < 0.05).float()
         # 출력 데이터를 위한 빈 텐서 생성
         self.targets = torch.zeros(num_samples, sequence_length, output_size).float()
         
         for output_neuron in range(output_size):
             # 각 출력 뉴런마다 주기 결정: 주어진 범위 내에서 랜덤하게 선택
-            period = torch.randint(low=period_range[0], high=period_range[1] + 1, size=(1,)).item()
+            period = torch.randint(low=period_range[0], high=period_range[1] + 1, size=(1,), generator=generator).item()
             
             # 설정된 주기에 따라 스파이크 생성
             spike_times = torch.arange(0, sequence_length, period)
@@ -45,7 +52,7 @@ class CustomSpikeDataset(Dataset):
         return self.data[idx], self.targets[idx]
     
 class CustomSpikeDataset_random(Dataset):
-    def __init__(self, num_samples=1000, sequence_length=50, input_size=100, output_size=2, spike_prob=0.02, total_spike=10):
+    def __init__(self, num_samples=1000, sequence_length=50, input_size=100, output_size=2, spike_prob=0.02, total_spike=10, seed=None):
         super().__init__()
         self.num_samples = num_samples
         self.sequence_length = sequence_length
@@ -53,8 +60,15 @@ class CustomSpikeDataset_random(Dataset):
         self.output_size = output_size
         self.spike_prob = spike_prob
 
+        # 로컬 Generator 생성 (전역 seed에 영향 없음)
+        if seed is not None:
+            generator = torch.Generator()
+            generator.manual_seed(seed)
+        else:
+            generator = None
+
         # 스파이크 확률을 기반으로 0 또는 1의 값을 갖는 스파이크 데이터 생성
-        self.data = (torch.rand(num_samples, sequence_length, input_size) < 0.05).float()
+        self.data = (torch.rand(num_samples, sequence_length, input_size, generator=generator) < 0.05).float()
 
         # 출력 데이터를 위한 빈 텐서 생성 (전체적으로 0으로 초기화)
         self.targets = torch.zeros(num_samples, sequence_length, output_size)
@@ -63,7 +77,7 @@ class CustomSpikeDataset_random(Dataset):
         for i in range(num_samples):
             for j in range(output_size):
                 # sequence_length 내에서 total_spike개의 랜덤한 시간 인덱스를 선택
-                spike_times = torch.randperm(sequence_length)[:total_spike]
+                spike_times = torch.randperm(sequence_length, generator=generator)[:total_spike]
                 # 해당 인덱스에서 스파이크 발생 (1로 설정)
                 self.targets[i, spike_times, j] = 1.0
 
@@ -87,7 +101,7 @@ class CustomSpikeDataset_Probabilistic(Dataset):
         input_spike_prob (float): 입력 데이터(data)에서 스파이크가 발생할 확률
         target_spike_prob (float): 타겟 데이터(targets)에서 스파이크가 발생할 확률
     """
-    def __init__(self, num_samples=1000, sequence_length=50, input_size=100, output_size=2, input_spike_prob=0.05, target_spike_prob=0.02):
+    def __init__(self, num_samples=1000, sequence_length=50, input_size=100, output_size=2, input_spike_prob=0.05, target_spike_prob=0.02, seed=None):
         super().__init__()
         self.num_samples = num_samples
         self.sequence_length = sequence_length
@@ -96,12 +110,19 @@ class CustomSpikeDataset_Probabilistic(Dataset):
         self.input_spike_prob = input_spike_prob
         self.target_spike_prob = target_spike_prob
 
+        # 로컬 Generator 생성 (전역 seed에 영향 없음)
+        if seed is not None:
+            generator = torch.Generator()
+            generator.manual_seed(seed)
+        else:
+            generator = None
+
         # 입력 데이터 생성: 각 타임스텝에서 input_spike_prob 확률로 스파이크(1) 발생
-        self.data = (torch.rand(num_samples, sequence_length, input_size) < self.input_spike_prob).float()
+        self.data = (torch.rand(num_samples, sequence_length, input_size, generator=generator) < self.input_spike_prob).float()
 
         # 타겟 데이터 생성: 각 타임스텝에서 target_spike_prob 확률로 스파이크(1) 발생
         # 이 부분이 요청하신 "완전 랜덤하게 모든 타임스텝에 대해서 spike_prob 확률로 spike가 만들어지도록" 하는 핵심 로직입니다.
-        self.targets = (torch.rand(num_samples, sequence_length, output_size) < self.target_spike_prob).float()
+        self.targets = (torch.rand(num_samples, sequence_length, output_size, generator=generator) < self.target_spike_prob).float()
         #self.targets=self.data.clone()  # 입력 데이터와 동일한 구조로 초기화
         
     def __len__(self):
@@ -113,17 +134,24 @@ class CustomSpikeDataset_Probabilistic(Dataset):
         return self.data[idx], self.targets[idx]
     
 class pattern_generation_Dataset(Dataset):
-    def __init__(self, num_samples=1000, sequence_length=1000, input_size=100, output_size=1, spike_prob=0.05, frequency=1):
+    def __init__(self, num_samples=1000, sequence_length=1000, input_size=100, output_size=1, spike_prob=0.05, frequency=1, seed=None):
         super().__init__()
         self.num_samples = num_samples
         self.sequence_length = sequence_length
         self.input_size = input_size
         self.output_size = output_size
         self.frequency = frequency  # 주기 함수의 주파수
-        
+
+        # 로컬 Generator 생성 (전역 seed에 영향 없음)
+        if seed is not None:
+            generator = torch.Generator()
+            generator.manual_seed(seed)
+        else:
+            generator = None
+
         # 입력 데이터 생성
-        self.data = (torch.rand(num_samples, sequence_length, input_size) < spike_prob).float()
-        
+        self.data = (torch.rand(num_samples, sequence_length, input_size, generator=generator) < spike_prob).float()
+
 
         # 사인 함수를 사용한 타겟 데이터 생성
         time_steps = torch.linspace(0, 2 * np.pi, sequence_length)

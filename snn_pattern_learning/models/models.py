@@ -837,7 +837,7 @@ class RSNN_eprop(nn.Module):
             yo = self.zo
 
         if do_training:
-            self.grads_batch(x, yo, yt)
+            self.compute_gradients(x.permute(1, 0, 2), yo.permute(1, 0, 2), yt.permute(1, 0, 2))
             
         return yo
     

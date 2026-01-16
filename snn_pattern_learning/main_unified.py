@@ -9,6 +9,9 @@ import os
 import sys
 import yaml
 from pathlib import Path
+import torch
+import numpy as np
+import random
 
 # Add current directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -21,6 +24,7 @@ from experiment_types import (
     StatisticalAblationExperiment,
     ClassificationExperiment
 )
+from experiment_types.teacher_student_noise_init import TeacherStudentNoiseInitExperiment
 
 
 def parse_arguments():
@@ -30,7 +34,7 @@ def parse_arguments():
     parser.add_argument('--config', type=str, default='default.yaml',
                        help='Configuration file name (default: default.yaml)')
     parser.add_argument('--experiment_type', type=str,
-                       choices=['basic', 'teacher_student', 'weight_init', 'statistical_ablation', 'classification'],
+                       choices=['basic', 'teacher_student', 'weight_init', 'statistical_ablation', 'classification', 'teacher_student_noise_init'],
                        help='Override experiment type from config')
     parser.add_argument('--name', type=str, help='Override experiment name')
     parser.add_argument('--epochs', type=int, help='Override number of epochs')
@@ -78,6 +82,8 @@ def create_experiment(config):
         return StatisticalAblationExperiment(config)
     elif experiment_type == 'classification':
         return ClassificationExperiment(config)
+    elif experiment_type == 'teacher_student_noise_init':
+        return TeacherStudentNoiseInitExperiment(config)
     else:
         raise ValueError(f"Unsupported experiment type: {experiment_type}")
 
