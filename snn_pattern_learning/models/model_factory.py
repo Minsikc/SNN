@@ -130,6 +130,33 @@ def create_model(model_type, model_config, neuron_type=None, neuron_config=None)
             n_hidden=n_hidden,
             n_out=n_out
         )
+    elif model_type == "EpropRSNN":
+        # Unified e-prop core (eprop/): LIF or ALIF hidden neurons, switchable
+        # gradient chain, readout gradient in software / on the 6T1C array /
+        # on its mock. yaml:
+        #   model.type: EpropRSNN
+        #   model.neuron: {kind: alif, beta: 0.5, rho: 0.9, pd_gamma: null}
+        #   model.grad_chain: {eligibility: full|truncated, rec_grad_orientation: legacy|corrected}
+        #   model.hardware: {enabled: true, use_mock_hw: true, ...}   (same keys as before)
+        from eprop import (EpropRSNN, HardwareReadout, SoftwareReadout, neuron_from_dict,
+                           chain_from_dict, hardware_from_dict)
+        ncfg = dict(model_config.get('neuron') or {})
+        ncfg.setdefault('tau', model_config.get('init_tau', 0.6))
+        ncfg.setdefault('thresh', model_config.get('init_thresh', 0.4))
+        ncfg.setdefault('tau_o', model_config.get('init_tau_o', 0.6))
+        neuron = neuron_from_dict(ncfg)
+        chain = chain_from_dict(model_config.get('grad_chain') or {})
+        hw_config = dict(model_config.get('hardware') or {})
+        readout = SoftwareReadout()
+        if hw_config.get('enabled', False):
+            readout = HardwareReadout(hardware_from_dict(hw_config))
+        model = EpropRSNN(
+            n_in=n_in, n_hidden=n_hidden, n_out=n_out, neuron=neuron, chain=chain,
+            recurrent=model_config.get('recurrent', True), readout=readout,
+            weight_scale=model_config.get('weight_scale', 0.5),
+        )
+        if model_config.get('learning_rule', 'eprop') == 'bptt':
+            model.set_learning_rule('bptt')
     elif model_type == "RSNN_eprop_HW_forward":
         # Hardware-integrated model - requires special handling
         hw_config = model_config.get('hardware', {})

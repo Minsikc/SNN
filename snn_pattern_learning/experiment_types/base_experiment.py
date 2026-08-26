@@ -83,7 +83,11 @@ class BaseExperiment(ABC):
             'gamma': self.config.get('model.gamma', 0.3),
             'width': self.config.get('model.width', 1),
             'weight_scale': self.config.get('model.weight_scale', 0.5),
-            'hardware': self.config.get('model.hardware', {})  # Include hardware config
+            'hardware': self.config.get('model.hardware', {}),  # Include hardware config
+            # eprop core (model.type: EpropRSNN) options
+            'neuron': self.config.get('model.neuron', {}) or {},
+            'grad_chain': self.config.get('model.grad_chain', {}) or {},
+            'learning_rule': self.config.get('model.learning_rule', 'eprop'),
         }
 
         # Get neuron configuration
@@ -136,6 +140,12 @@ class BaseExperiment(ABC):
                 # pipeline silently used the dataset default 1.0 -> the
                 # 2026-08-25 cross-task mismatch)
                 w_scale=self.config.get('dataset.w_scale', 1.0),
+                # ALIF teacher (model.type EpropRSNN with model.neuron.kind alif):
+                # the teacher must share the student's adaptation so the task
+                # stays realizable (planted teacher weights -> loss 0)
+                beta=(self.config.get('model.neuron.beta', 0.0)
+                      if self.config.get('model.neuron.kind', 'lif') == 'alif' else 0.0),
+                rho=self.config.get('model.neuron.rho', 0.9),
             )
         elif dataset_type == "TemporalXORDataset":
             return TemporalXORDataset(

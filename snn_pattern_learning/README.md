@@ -1,5 +1,16 @@
 # SNN Pattern Learning - Unified Experiment System
 
+> **2026-08-26 — e-prop / 6T1C consolidation.** 이 폴더가 e-prop 하드웨어 실험의
+> 단일 코드베이스입니다. 새 구조·이동 경로·실행법은 [`docs/MIGRATION.md`](docs/MIGRATION.md),
+> 코드 무결성 점검 결과(특히 legacy "BPTT" 조건이 e-prop+autograd 혼합이었던 문제)는
+> [`docs/INTEGRITY_REPORT.md`](docs/INTEGRITY_REPORT.md)를 보세요.
+>
+> - `eprop/` — 새 코어: `EpropRSNN`(LIF/ALIF, full/truncated eligibility, sw/hw/mock readout), `run_condition()`
+> - `hardware/` — `hw_interface.py`, `device_model.py`(aihwkit 6T1C 모델), `firmware/`, `measure/`(소자 측정 스크립트 + 데이터 + 러너)
+> - `scripts/` — 실험 진입점(teacher_student / xor / analysis / hw / legacy), 패키지 루트에서 실행
+> - `tests/` — `python -m pytest tests -q` (36 tests, 하드웨어 불필요; legacy와 bit-exact 동치성·논문 수치 재현 포함)
+> - 확장 실험(ALIF + gradient chain): `python scripts/teacher_student/run_alif_conditions.py`, `configs/eprop_alif_*.yaml`
+
 이 프로젝트는 Spiking Neural Networks (SNN)를 위한 통합 실험 시스템입니다. 다양한 실험 타입을 YAML 설정 파일로 관리하고, 뉴런 타입을 동적으로 선택할 수 있습니다.
 
 ## 주요 기능

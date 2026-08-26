@@ -736,9 +736,14 @@ class CustomSpikeDataset_Teacher(Dataset):
 
     def __init__(self, num_samples=5, sequence_length=20, input_size=10,
                  output_size=5, spike_prob=0.2, hidden_size=5,
-                 teacher_thresh=0.2, teacher_tau=0.6, w_scale=1.0, seed=0):
+                 teacher_thresh=0.2, teacher_tau=0.6, w_scale=1.0, seed=0,
+                 beta=0.0, rho=0.0):
+        # beta/rho: adaptive-threshold (ALIF) teacher, A_t = thresh + beta*a_t,
+        # a_{t+1} = rho*a_t + z_t (Bellec 2020). beta=0 is the plain LIF
+        # teacher and is bit-identical to the pre-2026-08-26 behaviour.
         super().__init__()
         import torch as _torch
+        self.beta, self.rho = float(beta), float(rho)
 
         g = _torch.Generator().manual_seed(seed)
         self.data = (_torch.rand(num_samples, sequence_length, input_size,
@@ -760,13 +765,19 @@ class CustomSpikeDataset_Teacher(Dataset):
 
         v = _torch.zeros(num_samples, hidden_size)
         z = _torch.zeros(num_samples, hidden_size)
+        a = _torch.zeros(num_samples, hidden_size)      # ALIF adaptation (unused if beta == 0)
         vo = _torch.zeros(num_samples, output_size)
         outs = []
         with _torch.no_grad():
             for t in range(sequence_length):
                 I = self.data[:, t, :] @ w_in + z @ w_rec
                 v = teacher_tau * v * (1 - z) + I
-                z = (v > teacher_thresh).float()
+                if self.beta != 0.0:
+                    A = teacher_thresh + self.beta * a
+                    z = (v > A).float()
+                    a = self.rho * a + z
+                else:
+                    z = (v > teacher_thresh).float()
                 vo = teacher_tau * vo * (1 - (vo > teacher_thresh).float()) + z @ w_out
                 outs.append((vo > teacher_thresh).float())
         self.targets = _torch.stack(outs, 1)

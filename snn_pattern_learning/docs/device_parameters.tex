@@ -1,0 +1,159 @@
+% Device parameter tables for the 5x5 6T1C array.
+% Compile with pdflatex (booktabs, siunitx, amsmath required).
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{siunitx}
+\usepackage{caption}
+
+\sisetup{
+  separate-uncertainty = true,
+  table-align-uncertainty = true,
+}
+
+\newcommand{\dtod}{$\sigma_\mathrm{d2d}$}
+\newcommand{\ctoc}{$\sigma_\mathrm{c2c}$}
+
+\title{6T1C 5$\times$5 array: measured device parameters}
+\author{}
+\date{Measured 2026-08-10}
+
+\begin{document}
+\maketitle
+
+\section*{Definitions}
+
+Two variability components are separated throughout. Each cell was measured
+over $n_\mathrm{rep}$ repeats, so
+
+\begin{align}
+  \sigma_\mathrm{c2c}^2 &= \Big\langle \operatorname{var}_\mathrm{rep}(x_{c,\cdot}) \Big\rangle_c
+  && \text{cycle-to-cycle, within a cell} \\
+  \sigma_\mathrm{d2d}^2 &= \operatorname{var}_c\!\big(\bar{x}_c\big)
+     - \frac{\sigma_\mathrm{c2c}^2}{n_\mathrm{rep}}
+  && \text{device-to-device, across cells}
+\end{align}
+
+The subtraction in (2) removes the sampling noise carried by each cell mean;
+without it \dtod{} is inflated by $\sigma_\mathrm{c2c}/\sqrt{n_\mathrm{rep}}$.
+All values below are the corrected ones. Levels are in ADC LSB (differential,
+$\mathrm{N5}-\mathrm{N6}$); the array rails are $+455/-444$~LSB.
+
+\section*{Read disturbance}
+
+Each read removes a fixed fraction of the \emph{distance} to an attractor
+$V_\infty$, not of the level itself:
+%
+\begin{equation}
+  V_k = V_\infty + (V_0 - V_\infty)\,e^{-k/\tau},
+  \qquad
+  V \leftarrow V_\infty + (V - V_\infty)\,e^{-1/\tau}\ \text{per read}
+\end{equation}
+%
+with $k$ the cumulative read count. The alternative $V_k = V_0 e^{-k/\tau}$
+was rejected (cross-validated RMSE 23.1 vs 4.8~LSB): the traces plainly
+settle at a non-zero level after 7.9 time constants. $V_\infty$ is an
+\emph{absolute} attractor, not a fixed fraction of $V_0$ --- a run started
+from $-401$~LSB rises through zero and lands on the same level as a run
+started from $+426$~LSB (pooled regression $V_\infty = -0.008\,V_0 + 11.2$).
+
+\begin{table}[h]
+\centering
+\caption{Read-disturbance parameters. 25 cells $\times$ 3 repeats $\times$ 2
+starting polarities, $k = 1\ldots1000$, 31 log-spaced sample points per trace
+(4650 measurements). Model RMSE 4.98~LSB.}
+\begin{tabular}{llS[table-format=4.2]S[table-format=2.2]S[table-format=2.2]S[table-format=-3.1]@{\,--\,}S[table-format=-3.1]}
+\toprule
+Parameter & Arm & {mean} & {\dtod} & {\ctoc} & \multicolumn{2}{c}{per-cell range} \\
+\midrule
+$V_0$ (LSB)      & positive & 426.12 & 46.81 & 12.31 & 343.6 & 516.5 \\
+                 & negative & -401.19 & 33.51 & 6.02 & -473.7 & -344.0 \\
+\addlinespace
+$\tau$ (reads)   & positive & 127.80 & 4.55 & 3.74 & 117.9 & 136.3 \\
+                 & negative & 117.15 & 2.88 & 3.62 & 110.3 & 124.9 \\
+\addlinespace
+$V_\infty$ (LSB) & positive & 7.17 & 20.30 & 2.78 & -61.6 & 45.8 \\
+                 & negative & 15.04 & 18.29 & 4.56 & -41.4 & 52.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent
+\textbf{Notes.}
+\begin{itemize}
+  \item Spreads are given as absolute $\sigma$ rather than as a coefficient of
+        variation. A cv would be misleading here: the mean of $V_\infty$ sits
+        near zero, so $\sigma/|\mu|$ diverges (it evaluates to 2.83 and 1.22
+        for the two arms purely because the denominators are 7.17 and
+        15.04~LSB, even though the two $\sigma$ are nearly equal at 20.3 and
+        18.3~LSB). Read $V_\infty$ as $\sigma \approx 19$~LSB.
+  \item $V_\infty$ takes negative values on some cells ($-61.6$ to
+        $+52.0$~LSB). A negative asymptote cannot be stored charge, so
+        $V_\infty$ is a read-path offset rather than a physical level.
+  \item $\tau$ differs between polarities by 10.7~reads, which is significant
+        against \ctoc{} (Welch $t = 12.4$, $p = 3\times10^{-24}$). The two arms
+        must therefore be kept separate; pooling them inflates \ctoc{} from
+        3.7 to 7.0~reads by leaking the polarity difference into the
+        within-cell term.
+  \item $\tau$ has $\sigma_\mathrm{d2d} \approx \sigma_\mathrm{c2c}$
+        (4.6 vs 3.7~reads), i.e.\ a cell's $\tau$ is barely more predictable
+        than a single repeat and the array is nearly uniform. $V_\infty$ is
+        the opposite: $\sigma_\mathrm{d2d}/\sigma_\mathrm{c2c} \approx 5$, so
+        it is strongly cell-specific and worth calibrating per cell.
+  \item $\tau$ is in units of \emph{reads}, not time. The separately measured
+        charge leakage ($\tau \approx 4$--$6$~s) is a different mechanism and
+        must be applied independently, not summed with this one.
+  \item $V_\infty$ is not stable across sessions: it was $+67.4$~LSB on
+        2026-08-06 and $+7.2$~LSB here, an $89\%$ change, while $\tau$ moved
+        only $0.7\%$. Re-measure $V_\infty$ each session; $\tau$ may be reused.
+\end{itemize}
+
+\section*{Update (LinearStep) parameters}
+
+Per coincidence the cell follows aihwkit's \texttt{LinearStepDevice} rule,
+$w \leftarrow w + \mathrm{slope}\cdot w + \mathrm{scale}$, clipped to
+$[w_\mathrm{min}, w_\mathrm{max}]$, with
+$\mathrm{slope}_\uparrow = -\gamma_\uparrow\,\mathrm{scale}_\uparrow/w_\mathrm{max}$
+and
+$\mathrm{slope}_\downarrow = -\gamma_\downarrow\,\mathrm{scale}_\downarrow/w_\mathrm{min}$.
+
+\begin{table}[h]
+\centering
+\caption{Per-cell update parameters from the full-range cycle test (3 cycles,
+15 read points per half-cycle, 25 cells). Only one fit per cell is available,
+so these are \dtod{} only; \ctoc{} was not separable from this dataset.}
+\begin{tabular}{lS[table-format=-3.2]S[table-format=2.2]S[table-format=-3.2]@{\,--\,}S[table-format=-3.2]}
+\toprule
+Parameter & {mean} & {\dtod} & \multicolumn{2}{c}{per-cell range} \\
+\midrule
+$\mathrm{scale}_\uparrow$ (LSB)   & 14.43 & 2.96 & 10.11 & 22.47 \\
+$\mathrm{scale}_\downarrow$ (LSB) & 21.04 & 2.55 & 17.12 & 28.21 \\
+$\gamma_\uparrow$                 & 1.29 & 0.11 & 0.96 & 1.44 \\
+$\gamma_\downarrow$               & 1.11 & 0.08 & 0.98 & 1.24 \\
+$w_\mathrm{max}$ (LSB)            & 434.11 & 13.04 & 417.01 & 469.51 \\
+$w_\mathrm{min}$ (LSB)            & -438.54 & 17.65 & -512.61 & -424.61 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent
+\textbf{Notes.}
+\begin{itemize}
+  \item Relative to their means the step scales carry most of the spread
+        ($\sigma/\mu = 0.21$ and $0.12$), while the $\gamma$'s and the bounds
+        are comparatively uniform ($0.03$--$0.09$); these ratios are quoted
+        safely because none of these means sits near zero. In simulation,
+        \texttt{dw\_min\_dtod} matters; \texttt{gamma\_*\_dtod} and
+        \texttt{w\_*\_dtod} can be left small.
+  \item Fitting these per cell reduces the cycle-test RMSE from 61.3 to
+        12.9~LSB ($79\%$), so most of the shared-parameter error is
+        cell-to-cell spread rather than a failure of the LinearStep form.
+  \item $\gamma$ near 1 corresponds to soft bounds, where the step vanishes at
+        the rails. A $\gamma \approx 1.8$ obtained by extrapolating the
+        within-burst decay was contradicted by the cycle test, which drives
+        the cell rail to rail.
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,70 @@
+# ALIF e-prop with the readout gradient accumulated on the (mock) 6T1C array.
+# Set hardware.use_mock_hw: false and serial_port: COM4 for the real array.
+#   python main_unified.py --config eprop_alif_mock.yaml
+experiment:
+  type: "basic"
+  name: "eprop_alif_mock"
+  save_results: true
+  results_dir: "results/eprop_alif"
+
+model:
+  type: "EpropRSNN"
+  n_in: 10
+  n_hidden: 4
+  n_out: 4
+  recurrent: true
+  init_tau: 0.6
+  init_thresh: 0.4
+  init_tau_o: 0.6
+  weight_scale: 0.5
+  neuron:
+    kind: "alif"
+    beta: 0.5
+    rho: 0.9
+  grad_chain:
+    eligibility: "truncated"   # the rank-1-mappable chain
+  hardware:
+    enabled: true
+    use_mock_hw: true
+    serial_port: "COM4"
+    baud_rate: 115200
+    bit_length: 10
+    pulse_width: 15
+    pulse_pre: 100
+    pulse_post: 100
+    pulse_zero: 10
+    read_time: 20
+    read_delay: 10
+    normalization_scale: 0.7
+    no_read_updates: true
+    dno: false
+    grad_log_path: "results/eprop_alif/gradient_log_alif_mock.csv"
+
+dataset:
+  type: "CustomSpikeDataset_Teacher"
+  num_samples: 1
+  sequence_length: 20
+  spike_prob: 0.2
+  seed: 25
+  w_scale: 1.5
+
+training:
+  batch_size: 1
+  learning_rate: 0.05
+  epochs: 50
+  optimizer: "Adam"
+  init_seed: 0
+
+kernel:
+  size: 3
+  decay_rate: 2.0
+
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"
+
+wandb:
+  enabled: false

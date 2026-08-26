@@ -1,0 +1,33 @@
+{
+  "lsb_per_w": 455.0,
+  "w0_reset": -0.15682417582417582,
+  "measured": {
+    "A_pot": 15.024417694744777,
+    "k_pot": 0.045999092182312414,
+    "A_dep": 15.339032906273323,
+    "k_dep": 0.08139088661406836,
+    "hs_pot": 0.7325229659350548,
+    "hs_reset": -1.42705369611741,
+    "hs_dep": -1.1183615550697767,
+    "resid_sd": 8.48023542620738
+  },
+  "linearstep": {
+    "construction_seed": 0,
+    "dw_min": 0.046476,
+    "dw_min_dtod": 0.1574,
+    "dw_min_std": 0.5644,
+    "up_down": -0.4447,
+    "up_down_dtod": 0.1231,
+    "w_max": 1.0,
+    "w_min": -0.9758241758241758,
+    "w_max_dtod": 0.0,
+    "w_min_dtod": 0.0,
+    "gamma_up": 1.7824,
+    "gamma_down": 1.7089,
+    "gamma_up_dtod": 0.0,
+    "gamma_down_dtod": 0.0,
+    "allow_increasing": false,
+    "mean_bound_reference": true,
+    "mult_noise": false
+  }
+}
