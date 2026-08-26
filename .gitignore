@@ -192,3 +192,8 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+# local tool state
+.claude/
+snn_pattern_learning/wandb/
+nul
+NUL

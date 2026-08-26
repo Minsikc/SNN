@@ -1,0 +1,73 @@
+# 4x4 analog run (NR opcodes) — paper experiment 1 after the column-5 fault.
+# Array column 5 is column-side faulty (2026-08-24 diagnosis): model shrinks
+# to n_out=4 x n_hidden=4 on the physical top-left 4x4 block. Interface stays
+# 5x5; models.py zero-pads pulses and slices the read to (4,4).
+# lr is the SW-tuned digital optimum (sweep 2026-08-24); analog inherits it
+# untuned by design.
+
+experiment:
+  type: "basic"
+  name: "eprop_4x4_ds25_300ep_lr005"
+  save_results: true
+  results_dir: "results/eprop_grad_log"
+
+model:
+  type: "RSNN_eprop_HW_forward"
+  n_in: 10
+  n_hidden: 4
+  n_out: 4
+  recurrent: true
+  init_tau: 0.6
+  init_thresh: 0.4
+  init_tau_o: 0.6
+  gamma: 0.3
+  subthresh: 0.5
+  weight_scale: 0.5
+  width: 1
+
+  hardware:
+    enabled: true
+    use_mock_hw: false
+    serial_port: "COM4"
+    baud_rate: 115200
+    timeout: 30.0
+    # Operating point validated by uv_grid_sweep: BL=10, width 15, read 20
+    bit_length: 10
+    pulse_width: 15
+    pulse_pre: 100
+    pulse_post: 100
+    pulse_zero: 10
+    read_time: 20
+    read_delay: 10
+    grad_log_path: "results/eprop_grad_log/gradient_log_4x4_ds25_300ep_lr005.csv"
+    normalization_scale: 0.7
+    no_read_updates: true
+
+dataset:
+  type: "CustomSpikeDataset_Teacher"
+  num_samples: 1
+  sequence_length: 20
+  spike_prob: 0.2
+  seed: 25
+  w_scale: 1.5
+
+training:
+  batch_size: 1
+  learning_rate: 0.05
+  epochs: 300
+  optimizer: "Adam"
+  init_seed: 0
+
+kernel:
+  size: 3
+  decay_rate: 2.0
+
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"
+
+wandb:
+  enabled: false

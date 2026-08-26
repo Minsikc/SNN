@@ -15,7 +15,14 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from configs.config_loader import load_config, get_available_configs
 from experiment_types import BasicExperiment, TeacherStudentExperiment, WeightInitExperiment, StatisticalAblationExperiment
-from experiment_types.classification_experiment import ClassificationExperiment
+
+# Try to import ClassificationExperiment, but make it optional
+try:
+    from experiment_types.classification_experiment import ClassificationExperiment
+    HAS_CLASSIFICATION = True
+except ImportError:
+    ClassificationExperiment = None
+    HAS_CLASSIFICATION = False
 
 
 def parse_arguments():
@@ -37,6 +44,8 @@ def parse_arguments():
                        help='List available configuration files')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Enable verbose output')
+    parser.add_argument('--seed', type=int, default=None,
+                       help='Random seed for torch / numpy / cuda (for reproducibility)')
     
     return parser.parse_args()
 
@@ -72,7 +81,10 @@ def create_experiment(config):
     elif experiment_type == 'statistical_ablation':
         return StatisticalAblationExperiment(config)
     elif experiment_type == 'classification':
-        return ClassificationExperiment(config)
+        if HAS_CLASSIFICATION:
+            return ClassificationExperiment(config)
+        else:
+            raise ValueError("Classification experiment not available")
     else:
         raise ValueError(f"Unsupported experiment type: {experiment_type}")
 
@@ -101,7 +113,18 @@ def print_config_summary(config):
 def main():
     """Main function"""
     args = parse_arguments()
-    
+
+    if args.seed is not None:
+        import random
+        import numpy as np
+        import torch
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
+        print(f"[SEED] Set torch / numpy / random seed to {args.seed}")
+
     # List available configs if requested
     if args.list_configs:
         print("Available configuration files:")

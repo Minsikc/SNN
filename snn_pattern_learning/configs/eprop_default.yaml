@@ -1,0 +1,58 @@
+# Default configuration for E-prop Minsik experiments
+
+# Experiment settings
+experiment:
+  type: "eprop_sweep"
+  name: "eprop_minsik_sweep"
+  save_results: false
+  results_dir: "results/eprop_sweep"
+
+# Model parameters - specific to eprop_minsik
+model:
+  type: "RSNN_eprop"
+  n_in: 50
+  n_hidden: 100
+  n_out: 10
+  recurrent: true
+  init_tau: 0.6
+  init_thresh: 0.6
+  init_tau_o: 0.6
+  gamma: 0.3
+  subthresh: 0.5
+  weight_scale: 0.5
+  width: 1
+
+# Dataset parameters - CustomSpikeDataset_random
+dataset:
+  type: "CustomSpikeDataset_random"
+  num_samples: 1
+  sequence_length: 100
+  spike_prob: 0.05
+  total_spike: 5
+
+# Training parameters
+training:
+  batch_size: 1
+  learning_rate: 0.01
+  epochs: 200
+  optimizer: "Adam"
+
+# Kernel parameters
+kernel:
+  size: 7
+  decay_rate: 2.0
+
+# Logging and visualization
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: false
+  plot_format: "png"
+  log_level: "INFO"
+
+# WandB settings (overridden by sweep)
+wandb:
+  enabled: false
+  project: "snn-eprop-sweep"
+  entity: null
+  tags: ["eprop", "minsik", "bayesian"]

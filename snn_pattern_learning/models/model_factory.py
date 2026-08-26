@@ -79,22 +79,37 @@ def create_model(model_type, model_config, neuron_type=None, neuron_config=None)
     # Create base model
     if model_type == "Basic_RSNN_spike":
         model = Basic_RSNN_spike(
-            n_in=n_in, 
-            n_hidden=n_hidden, 
+            n_in=n_in,
+            n_hidden=n_hidden,
             n_out=n_out,
-            recurrent=model_config.get('recurrent', False)
+            recurrent=model_config.get('recurrent', False),
+            init_tau=model_config.get('init_tau', 0.6),
+            weight_scale=model_config.get('weight_scale', 0.5)
         )
     elif model_type == "RSNN_eprop":
         model = Basic_RSNN_eprop_minsik(
-            n_in=n_in, 
-            n_hidden=n_hidden, 
-            n_out=n_out
+            n_in=n_in,
+            n_hidden=n_hidden,
+            n_out=n_out,
+            subthresh=model_config.get('subthresh', 0.5),
+            recurrent=model_config.get('recurrent', True),
+            init_tau=model_config.get('init_tau', 0.60),
+            init_thresh=model_config.get('init_thresh', 0.6),
+            init_tau_o=model_config.get('init_tau_o', 0.6),
+            gamma=model_config.get('gamma', 0.3),
+            width=model_config.get('width', 1)
         )
     elif model_type == "RSNN_eprop_forward":
         model = Basic_RSNN_eprop_forward(
-            n_in=n_in, 
-            n_hidden=n_hidden, 
-            n_out=n_out
+            n_in=n_in,
+            n_hidden=n_hidden,
+            n_out=n_out,
+            recurrent=model_config.get('recurrent', True),
+            init_tau=model_config.get('init_tau', 0.60),
+            init_thresh=model_config.get('init_thresh', 0.5),
+            init_tau_o=model_config.get('init_tau_o', 0.6),
+            gamma=model_config.get('gamma', 0.3),
+            width=model_config.get('width', 1)
         )
     elif model_type == "RSNN_eprop_analog_forward":
         model = Basic_RSNN_eprop_analog_forward(
@@ -123,20 +138,53 @@ def create_model(model_type, model_config, neuron_type=None, neuron_config=None)
             n_hidden=n_hidden,  # Must be 5 for hardware
             n_out=n_out,        # Must be 5 for hardware
             recurrent=model_config.get('recurrent', True),
+            # Neuron parameters were previously NOT forwarded, so the model
+            # silently ran at constructor defaults (init_thresh=0.6 after the
+            # threshold-alignment fix) no matter what the yaml said, while
+            # the teacher dataset DID receive model.init_thresh -- breaking
+            # teacher/student threshold alignment. Now wired through.
+            init_tau=model_config.get('init_tau', 0.60),
+            init_thresh=model_config.get('init_thresh', 0.5),
+            init_tau_o=model_config.get('init_tau_o', 0.6),
+            gamma=model_config.get('gamma', 0.3),
             hw_enabled=hw_config.get('enabled', True),
             serial_port=hw_config.get('serial_port', 'COM7'),
             baud_rate=hw_config.get('baud_rate', 115200),
             bit_length=hw_config.get('bit_length', 10),
-            use_mock_hw=hw_config.get('use_mock', False),
+            use_mock_hw=hw_config.get('use_mock_hw', False),
+            mock_quantize_bits=hw_config.get('mock_quantize_bits', 0),
+            mock_quantize_seed=hw_config.get('mock_quantize_seed', 0),
+            adc_to_grad_scale=hw_config.get('adc_to_grad_scale', 0.001),
+            auto_calibrate_scale=hw_config.get('auto_calibrate_scale', True),
+            calibrate_ema=hw_config.get('calibrate_ema', 0.5),
+            # these were previously silently dropped, so the interface always
+            # ran at its own defaults (pulse_width=1) regardless of the yaml
+            normalization_scale=hw_config.get('normalization_scale', 1.0),
+            pulse_width=hw_config.get('pulse_width', 15),
+            pulse_pre=hw_config.get('pulse_pre', 100),
+            pulse_post=hw_config.get('pulse_post', 100),
+            pulse_zero=hw_config.get('pulse_zero', 10),
+            read_time=hw_config.get('read_time', 20),
+            read_delay=hw_config.get('read_delay', 10),
+            no_read_updates=hw_config.get('no_read_updates', False),
+            dno=hw_config.get('dno', False),
         )
+        # ablation: freeze the output layer (skip apply_hw_gradient)
+        model.freeze_wout = hw_config.get('freeze_wout', False)
+        # per-epoch CSV of desired vs hardware-read gradient, all 25 cells
+        model.grad_log_path = hw_config.get('grad_log_path', None)
+        model.grad_log_epoch = 0
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
     
-    # Patch neuron functions if specified
-    if neuron_type is not None and neuron_config is not None:
+    # Patch neuron functions ONLY when the yaml explicitly configures the
+    # neuron (non-empty config). Previously the default neuron_type
+    # 'triangular' with an empty config silently replaced every model's own
+    # surrogate (e.g. the HW model's Boxcar) with a default TriangleCall.
+    if neuron_type is not None and neuron_config:
         neuron_function = create_neuron_function(neuron_type, neuron_config)
         model = patch_model_neurons(model, neuron_function)
-    
+
     return model
 
 
@@ -144,34 +192,36 @@ class ConfigurableBasicRSNN(nn.Module):
     """
     Configurable version of Basic_RSNN_spike that allows different neuron types
     """
-    def __init__(self, n_in=100, n_hidden=200, n_out=20, subthresh=0.5, 
-                 recurrent=False, init_tau=0.60, neuron_type='triangular', neuron_config=None):
+    def __init__(self, n_in=100, n_hidden=200, n_out=20, subthresh=0.5,
+                 recurrent=False, init_tau=0.60, weight_scale=0.5,
+                 neuron_type='triangular', neuron_config=None):
         super().__init__()
-        
+
         self.n_in = n_in
         self.n_hidden = n_hidden
         self.n_out = n_out
         self.subthresh = subthresh
         self.init_tau = init_tau
+        self.weight_scale = weight_scale
         self.recurrent_connection = recurrent
         self.custom_grad = False
         self.custom_grad_forward = False
-        
+
         # Create neuron function based on type
         if neuron_config is None:
             neuron_config = {}
-        
+
         neuron_function = create_neuron_function(neuron_type, neuron_config)
-        
+
         # Initialize layers
         self.fc1 = nn.Linear(self.n_in, self.n_hidden, bias=False)
         nn.init.kaiming_normal_(self.fc1.weight)
-        self.fc1.weight.data *= 0.5
-        
+        self.fc1.weight.data *= self.weight_scale
+
         self.recurrent = nn.Parameter(torch.rand(self.n_hidden, self.n_hidden) / torch.sqrt(torch.tensor(self.n_hidden)))
         self.out = nn.Linear(self.n_hidden, self.n_out, bias=False)
         nn.init.kaiming_normal_(self.out.weight)
-        self.out.weight.data *= 0.5
+        self.out.weight.data *= self.weight_scale
         
         # Initialize neuron nodes with specified function
         # Use a copy of the neuron function for each node
@@ -239,6 +289,8 @@ def create_configurable_model(model_type, model_config, neuron_type='triangular'
             n_hidden=model_config.get('n_hidden', 40),
             n_out=model_config.get('n_out', 10),
             recurrent=model_config.get('recurrent', False),
+            init_tau=model_config.get('init_tau', 0.6),
+            weight_scale=model_config.get('weight_scale', 0.5),
             neuron_type=neuron_type,
             neuron_config=neuron_config
         )

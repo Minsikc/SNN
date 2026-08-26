@@ -1,0 +1,70 @@
+# E-prop Hardware Experiment Configuration (MOCK MODE)
+# Using mock memristor interface for testing without real hardware
+
+# Experiment settings
+experiment:
+  type: "basic"
+  name: "eprop_hw_mock_test"
+  save_results: true
+  results_dir: "results/eprop_hardware_mock"
+
+# Model parameters - RSNN_eprop_HW_forward
+model:
+  type: "RSNN_eprop_HW_forward"
+  n_in: 50
+  n_hidden: 5    # MUST be 5 for 5x5 hardware
+  n_out: 5       # MUST be 5 for 5x5 hardware
+  recurrent: true
+  init_tau: 0.6
+  init_thresh: 0.6
+  init_tau_o: 0.6
+  gamma: 0.3
+  subthresh: 0.5
+  weight_scale: 0.5
+  width: 1
+
+  # Hardware configuration - MOCK MODE
+  hardware:
+    enabled: true
+    use_mock_hw: true       # ✅ Using mock hardware for testing
+    serial_port: "COM7"
+    baud_rate: 115200
+    timeout: 10.0
+    bit_length: 10
+    pulse_width: 1
+    pulse_pre: 100
+    pulse_post: 100
+    pulse_zero: 10
+    read_time: 10
+    read_delay: 10
+
+# Dataset parameters
+dataset:
+  type: "CustomSpikeDataset_random"
+  num_samples: 1
+  sequence_length: 50
+  spike_prob: 0.05
+  total_spike: 5
+
+# Training parameters
+training:
+  batch_size: 1
+  learning_rate: 0.01
+  epochs: 10               # Quick test with 10 epochs
+  optimizer: "Adam"
+
+# Kernel parameters
+kernel:
+  size: 5
+  decay_rate: 2.0
+
+# Logging and visualization
+logging:
+  enable_logger: true
+  enable_pattern_analyzer: true
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"
+
+wandb:
+  enabled: false

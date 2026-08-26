@@ -1,0 +1,72 @@
+# ABLATION: W_out frozen at init, only fc1/recurrent learn (digitally).
+# Isolates the hidden layers' contribution to the loss drop.
+# Derived from eprop_hardware_demo_swonly.yaml.
+# Uses MockMemristorInterface so the optimizer / reset / data path is identical
+# to the real-HW run, but the "HW" gradient is the exact software outer-product
+# (no stochastic pulses, no ADC). Auto-calibration is disabled and the scale is
+# 1.0 so the SW desired gradient is applied verbatim.
+
+experiment:
+  type: "basic"
+  name: "eprop_hw_demo_frozen_wout"
+  save_results: true
+  results_dir: "results/eprop_hardware_demo_frozen_wout"
+
+model:
+  type: "RSNN_eprop_HW_forward"
+  n_in: 10
+  n_hidden: 5
+  n_out: 5
+  recurrent: true
+  init_tau: 0.6
+  init_thresh: 0.2
+  init_tau_o: 0.6
+  gamma: 0.3
+  subthresh: 0.5
+  weight_scale: 0.5
+  width: 1
+
+  hardware:
+    enabled: true
+    use_mock_hw: true        # no serial needed; W_out is frozen anyway
+    freeze_wout: true        # ABLATION: skip apply_hw_gradient, W_out stays at init
+    serial_port: "COM4"
+    baud_rate: 115200
+    timeout: 30.0
+    bit_length: 10
+    pulse_width: 1
+    pulse_pre: 100
+    pulse_post: 100
+    pulse_zero: 10
+    read_time: 10
+    read_delay: 10
+    adc_to_grad_scale: 1.0   # mock returns SW outer product directly
+    auto_calibrate_scale: false
+    calibrate_ema: 0.5
+
+dataset:
+  type: "CustomSpikeDataset_random"
+  num_samples: 5
+  sequence_length: 20
+  spike_prob: 0.2
+  total_spike: 10
+
+training:
+  batch_size: 1
+  learning_rate: 0.01
+  epochs: 30
+  optimizer: "Adam"
+
+kernel:
+  size: 3
+  decay_rate: 2.0
+
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"
+
+wandb:
+  enabled: false

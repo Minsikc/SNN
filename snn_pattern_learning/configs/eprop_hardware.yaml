@@ -1,0 +1,76 @@
+# E-prop Hardware Experiment Configuration
+# Using real memristor crossbar array for gradient accumulation
+
+# Experiment settings
+experiment:
+  type: "basic"
+  name: "eprop_hw_experiment"
+  save_results: true
+  results_dir: "results/eprop_hardware"
+
+# Model parameters - RSNN_eprop_HW_forward
+model:
+  type: "RSNN_eprop_HW_forward"
+  n_in: 50
+  n_hidden: 5    # ⚠️ MUST be 5 for 5x5 hardware
+  n_out: 5       # ⚠️ MUST be 5 for 5x5 hardware
+  recurrent: true
+  init_tau: 0.6
+  init_thresh: 0.15         # LOWERED to allow spiking (was 0.6)
+  init_tau_o: 0.6
+  gamma: 0.3
+  subthresh: 0.5
+  weight_scale: 0.5
+  width: 1
+
+  # Hardware configuration
+  hardware:
+    enabled: true           # Set to false to use software fallback
+    use_mock_hw: false      # Set to true for testing without hardware
+    serial_port: "COM4"     # Arduino serial port (COM4 for Arduino Due)
+    baud_rate: 115200
+    timeout: 10.0
+
+    # Stochastic pulse parameters
+    bit_length: 10          # Length of pulse streams
+    pulse_width: 1          # Pulse width in microseconds
+    pulse_pre: 100          # Pre-pulse delay
+    pulse_post: 100         # Post-pulse delay
+    pulse_zero: 10          # Zero-pulse delay
+    read_time: 10           # ADC read time
+    read_delay: 10          # Delay between reads
+
+# Dataset parameters - smaller for hardware testing
+dataset:
+  type: "CustomSpikeDataset_random"
+  num_samples: 5           # More samples for better statistics
+  sequence_length: 50      # Shorter sequences for hardware
+  spike_prob: 0.15         # INCREASED to ensure more spikes
+  total_spike: 15          # INCREASED to ensure strong input
+
+# Training parameters
+training:
+  batch_size: 1
+  learning_rate: 0.01      # Applied to hardware-accumulated gradients
+  epochs: 50               # Fewer epochs for hardware testing
+  optimizer: "Adam"
+
+# Kernel parameters
+kernel:
+  size: 5
+  decay_rate: 2.0
+
+# Logging and visualization
+logging:
+  enable_logger: true
+  enable_pattern_analyzer: true
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"
+
+# WandB settings (optional)
+wandb:
+  enabled: false
+  project: "snn-eprop-hardware"
+  entity: null
+  tags: ["eprop", "hardware", "memristor"]
