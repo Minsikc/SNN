@@ -1,0 +1,66 @@
+program: train_sweep_eprop.py
+method: bayes
+metric:
+  name: final_normalized_distance
+  goal: minimize
+
+parameters:
+  # Learning parameters
+  learning_rate:
+    distribution: log_uniform_values
+    min: 0.0001
+    max: 0.1
+
+  weight_scale:
+    distribution: uniform
+    min: 0.1
+    max: 1.0
+
+  # Network structure
+  n_hidden:
+    values: [50, 100, 150, 200, 250]
+
+  # Neuron parameters - membrane time constants
+  init_tau:
+    distribution: uniform
+    min: 0.3
+    max: 0.95
+
+  init_tau_o:
+    distribution: uniform
+    min: 0.3
+    max: 0.95
+
+  # Spike threshold
+  init_thresh:
+    distribution: uniform
+    min: 0.3
+    max: 1.0
+
+  # Surrogate gradient parameters
+  gamma:
+    distribution: uniform
+    min: 0.1
+    max: 1.0
+
+  subthresh:
+    distribution: uniform
+    min: 0.1
+    max: 0.8
+
+  # Kernel parameters (for loss computation)
+  kernel_size:
+    values: [3, 5, 7, 9, 11, 13, 15]
+
+  kernel_decay_rate:
+    distribution: uniform
+    min: 0.5
+    max: 5.0
+
+early_terminate:
+  type: hyperband
+  min_iter: 30
+  eta: 3
+  s: 2
+
+run_cap: 300

@@ -1,0 +1,60 @@
+# ALIF e-prop, readout gradient in software (digital). Extension experiment:
+# compare grad_chain.eligibility full vs truncated on the same ALIF teacher task.
+#   python main_unified.py --config eprop_alif_digital.yaml
+experiment:
+  type: "basic"
+  name: "eprop_alif_digital_full"
+  save_results: true
+  results_dir: "results/eprop_alif"
+
+model:
+  type: "EpropRSNN"
+  n_in: 10
+  n_hidden: 4
+  n_out: 4
+  recurrent: true
+  init_tau: 0.6          # alpha (membrane decay); also legacy pseudo-derivative height
+  init_thresh: 0.4       # firing threshold and pseudo-derivative half-width
+  init_tau_o: 0.6        # kappa
+  weight_scale: 0.5
+  learning_rule: "eprop"  # or "bptt"
+  neuron:
+    kind: "alif"          # lif | alif
+    beta: 0.5             # threshold adaptation strength (0 -> LIF)
+    rho: 0.9              # adaptation decay exp(-1/tau_a)
+    pd_gamma: null        # pseudo-derivative height; null -> init_tau (legacy)
+  grad_chain:
+    eligibility: "full"   # full (eps_a term) | truncated (LIF-trace approximation)
+    rec_grad_orientation: "legacy"   # legacy | corrected
+    bptt_surrogate: "boxcar"         # boxcar | triangle (bptt only)
+  hardware:
+    enabled: false
+
+dataset:
+  type: "CustomSpikeDataset_Teacher"   # teacher is ALIF with the same beta/rho
+  num_samples: 1
+  sequence_length: 20
+  spike_prob: 0.2
+  seed: 25
+  w_scale: 1.5
+
+training:
+  batch_size: 1
+  learning_rate: 0.05
+  epochs: 50
+  optimizer: "Adam"
+  init_seed: 0
+
+kernel:
+  size: 3
+  decay_rate: 2.0
+
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"
+
+wandb:
+  enabled: false

@@ -1,0 +1,75 @@
+# E-prop Hardware Demo Configuration
+# Quick demo with minimal timesteps for fast testing
+
+experiment:
+  type: "basic"
+  name: "eprop_seed2"
+  save_results: true
+  results_dir: "results/eprop_grad_log"
+
+model:
+  type: "RSNN_eprop_HW_forward"
+  n_in: 10       # Reduced for faster demo
+  n_hidden: 5    # MUST be 5 for 5x5 hardware
+  n_out: 5       # MUST be 5 for 5x5 hardware
+  recurrent: true
+  init_tau: 0.6
+  init_thresh: 0.2         # LOWERED from 0.6 to allow spiking
+  init_tau_o: 0.6
+  gamma: 0.3
+  subthresh: 0.5
+  weight_scale: 0.5
+  width: 1
+
+  hardware:
+    enabled: true
+    use_mock_hw: false
+    serial_port: "COM4"     # Arduino Due
+    baud_rate: 115200
+    timeout: 30.0           # Longer timeout for hardware
+    # Operating point validated by uv_grid_sweep 2026-08-05:
+    # BL=10, width 15us, read 20 -> r ~ 0.92 update fidelity
+    bit_length: 10
+    pulse_width: 15
+    pulse_pre: 100
+    pulse_post: 100
+    pulse_zero: 10
+    read_time: 20
+    read_delay: 10
+    # per-epoch CSV: all 25 cells, desired vs hardware-read gradient
+    grad_log_path: "results/eprop_grad_log/gradient_log_seed2.csv"
+    # cap u*v at ~0.49 so coincidences stay <= ~5 per command,
+    # inside the measured linear regime of the state-dependent update
+    normalization_scale: 0.7
+
+dataset:
+  # single teacher-generated sequence: BPTT reaches VRD=0 on this task, so
+  # the achievable floor is known and any gap is the analog path
+  type: "CustomSpikeDataset_Teacher"
+  num_samples: 1
+  sequence_length: 20
+  spike_prob: 0.2
+  seed: 10
+
+training:
+  batch_size: 1
+  learning_rate: 0.1
+  epochs: 50
+  optimizer: "Adam"
+  # copy initial weights from the SW model built with this seed, so the
+  # analog run starts from exactly the same point as the digital one
+  init_seed: 2
+
+kernel:
+  size: 3                  # Smaller kernel
+  decay_rate: 2.0
+
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"
+
+wandb:
+  enabled: false

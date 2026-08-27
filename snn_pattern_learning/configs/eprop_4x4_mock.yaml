@@ -1,0 +1,70 @@
+# 4x4 pipeline verification on the MOCK interface.
+# Array column 5 went bad (column-side, 2026-08-24 diagnosis) -> the model
+# shrinks to n_out=4 x n_hidden=4 and uses the physical top-left 4x4 block.
+# The interface stays 5x5: models.py pads pulse vectors with zero probability
+# and slices the (5,5) read back to (4,4).
+
+experiment:
+  type: "basic"
+  name: "eprop_4x4_mock"
+  save_results: true
+  results_dir: "results/eprop_grad_log"
+
+model:
+  type: "RSNN_eprop_HW_forward"
+  n_in: 10
+  n_hidden: 4
+  n_out: 4
+  recurrent: true
+  init_tau: 0.6
+  init_thresh: 0.4
+  init_tau_o: 0.6
+  gamma: 0.3
+  subthresh: 0.5
+  weight_scale: 0.5
+  width: 1
+
+  hardware:
+    enabled: true
+    use_mock_hw: true
+    serial_port: "COM4"
+    baud_rate: 115200
+    timeout: 30.0
+    bit_length: 10
+    pulse_width: 15
+    pulse_pre: 100
+    pulse_post: 100
+    pulse_zero: 10
+    read_time: 20
+    read_delay: 10
+    grad_log_path: "results/eprop_grad_log/gradient_log_4x4_mock.csv"
+    normalization_scale: 0.7
+    no_read_updates: true
+
+dataset:
+  type: "CustomSpikeDataset_Teacher"
+  num_samples: 1
+  sequence_length: 20
+  spike_prob: 0.2
+  seed: 10
+
+training:
+  batch_size: 1
+  learning_rate: 0.1
+  epochs: 5
+  optimizer: "Adam"
+  init_seed: 0
+
+kernel:
+  size: 3
+  decay_rate: 2.0
+
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: false
+  plot_format: "png"
+  log_level: "INFO"
+
+wandb:
+  enabled: false

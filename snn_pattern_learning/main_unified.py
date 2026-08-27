@@ -24,7 +24,14 @@ from experiment_types import (
     StatisticalAblationExperiment,
     ClassificationExperiment
 )
-from experiment_types.teacher_student_noise_init import TeacherStudentNoiseInitExperiment
+
+# Optional: origin/main (eefcc23) imports this module unconditionally, but the
+# file was never committed. Keep the experiment type available when the module
+# exists without breaking every other experiment when it does not.
+try:
+    from experiment_types.teacher_student_noise_init import TeacherStudentNoiseInitExperiment
+except ImportError:
+    TeacherStudentNoiseInitExperiment = None
 
 
 def parse_arguments():
@@ -46,6 +53,8 @@ def parse_arguments():
                        help='List available configuration files')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Enable verbose output')
+    parser.add_argument('--seed', type=int, default=None,
+                       help='Random seed for torch / numpy / cuda (for reproducibility)')
     
     return parser.parse_args()
 
@@ -83,6 +92,8 @@ def create_experiment(config):
     elif experiment_type == 'classification':
         return ClassificationExperiment(config)
     elif experiment_type == 'teacher_student_noise_init':
+        if TeacherStudentNoiseInitExperiment is None:
+            raise ValueError("experiment_types/teacher_student_noise_init.py is not present in this checkout")
         return TeacherStudentNoiseInitExperiment(config)
     else:
         raise ValueError(f"Unsupported experiment type: {experiment_type}")
@@ -112,7 +123,18 @@ def print_config_summary(config):
 def main():
     """Main function"""
     args = parse_arguments()
-    
+
+    if args.seed is not None:
+        import random
+        import numpy as np
+        import torch
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
+        print(f"[SEED] Set torch / numpy / random seed to {args.seed}")
+
     # List available configs if requested
     if args.list_configs:
         print("Available configuration files:")

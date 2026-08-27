@@ -6,6 +6,9 @@ import math
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
 import torch.nn.init as init
+import logging
+
+logger = logging.getLogger(__name__)
 
 try:
     from aihwkit.nn import AnalogLinear
@@ -127,15 +130,17 @@ class Basic_RSNN_spike(nn.Module):
         n_out = 20,
         subthresh = 0.5,
         recurrent = False,
-        init_tau: float = 0.60,              # membrane decaying time constant    # spike trace decaying time constant
+        init_tau: float = 0.60,              # membrane decaying time constant
+        weight_scale: float = 0.5,           # initial weight scaling factor
     ):
         super().__init__()
-        
+
         self.n_in = n_in
         self.n_hidden = n_hidden
         self.n_out = n_out
         self.subthresh = subthresh
         self.init_tau = init_tau
+        self.weight_scale = weight_scale
         self.recurrent_connection = recurrent
         self.custom_grad = False
         self.custom_grad_forward = False
@@ -154,12 +159,12 @@ class Basic_RSNN_spike(nn.Module):
         zero_ratio=0.3
         self.fc1 = nn.Linear(self.n_in, self.n_hidden, bias=False)
         init.kaiming_normal_(self.fc1.weight)
-        self.fc1.weight.data *= 0.5
+        self.fc1.weight.data *= self.weight_scale
 
         self.recurrent = nn.Parameter(torch.rand(self.n_hidden, self.n_hidden)/np.sqrt(self.n_hidden))
         self.out = nn.Linear(self.n_hidden, self.n_out, bias=False)
         init.kaiming_normal_(self.out.weight)
-        self.out.weight.data *= 0.5
+        self.out.weight.data *= self.weight_scale
         #self.out.weight = nn.Parameter(torch.randn(self.n_hidden, self.n_out)/(np.sqrt(self.n_hidden)))
         self.LIF0 = LIF_Node(surrogate_function=TriangleCall())
         self.out_node = LIF_Node(surrogate_function=TriangleCall())
@@ -951,8 +956,18 @@ class Basic_RSNN_eprop_minsik(nn.Module):
         init.kaiming_normal_(self.out.weight)
         self.out.weight.data *= 0.5
         #self.out.weight = nn.Parameter(torch.randn(self.n_hidden, self.n_out)/(np.sqrt(self.n_hidden)))
-        self.LIF0 = LIF_Node(surrogate_function=HeavisideBoxcarCall())
-        self.out_node = LIF_Node(surrogate_function=HeavisideBoxcarCall())
+        # init_thresh reaches the spiking nodes, not only self.thr (which is
+        # used for the surrogate derivative). Without this the student always
+        # fired at LIF_Node's default 0.5 regardless of init_thresh, so a
+        # teacher built at any other threshold was a DIFFERENT network and its
+        # weights were not a solution: planting them into the student gave
+        # loss 0.848 instead of 0. With this wired in -- and the teacher built
+        # from the same init_thresh/init_tau -- the teacher's own weights are
+        # an exact optimum (loss 0.000000, verified for thresh 0.1..0.5).
+        self.LIF0 = LIF_Node(surrogate_function=HeavisideBoxcarCall(),
+                             initial_thresh=init_thresh)
+        self.out_node = LIF_Node(surrogate_function=HeavisideBoxcarCall(),
+                                 initial_thresh=init_thresh)
         self.mask = torch.ones(self.n_hidden, self.n_hidden) - torch.eye(self.n_hidden)
         torch.nn.init.kaiming_normal_(self.recurrent)
 
@@ -1228,8 +1243,18 @@ class Basic_RSNN_eprop_forward(nn.Module):
         init.kaiming_normal_(self.out.weight)
         self.out.weight.data *= 0.5
         #self.out.weight = nn.Parameter(torch.randn(self.n_hidden, self.n_out)/(np.sqrt(self.n_hidden)))
-        self.LIF0 = LIF_Node(surrogate_function=TriangleCall())
-        self.out_node = LIF_Node(surrogate_function=TriangleCall())
+        # init_thresh reaches the spiking nodes, not only self.thr (which is
+        # used for the surrogate derivative). Without this the student always
+        # fired at LIF_Node's default 0.5 regardless of init_thresh, so a
+        # teacher built at any other threshold was a DIFFERENT network and its
+        # weights were not a solution: planting them into the student gave
+        # loss 0.848 instead of 0. With this wired in -- and the teacher built
+        # from the same init_thresh/init_tau -- the teacher's own weights are
+        # an exact optimum (loss 0.000000, verified for thresh 0.1..0.5).
+        self.LIF0 = LIF_Node(surrogate_function=HeavisideBoxcarCall(),
+                             initial_thresh=init_thresh)
+        self.out_node = LIF_Node(surrogate_function=HeavisideBoxcarCall(),
+                                 initial_thresh=init_thresh)
         self.mask = torch.ones(self.n_hidden, self.n_hidden) - torch.eye(self.n_hidden)
         torch.nn.init.kaiming_normal_(self.recurrent)
 
@@ -1241,8 +1266,7 @@ class Basic_RSNN_eprop_forward(nn.Module):
 
     def forward(self, x, label, training):
         self.device = x.device
-        self.init_net()                                       
-        # x.shape = [batch_size, time, channel, width, height]
+        self.init_net()
         self.hidden_mem_list = []
         self.hidden_spike_list = []
         self.outputs = []
@@ -1250,41 +1274,69 @@ class Basic_RSNN_eprop_forward(nn.Module):
         num_steps = x.size(1)
         batch_size = x.size(0)
 
-        #x = x.view(x.size(0), x.size(1), -1)
         hidden_mem = hidden_spike = torch.zeros(batch_size, self.n_hidden, device=self.device)
-        out_mem = out_spike = torch.zeros(batch_size, self.n_out, device = self.device)
-        #effective_recurrent = self.recurrent * self.mask.to(self.device)
-        #sparse_effective_recurrent=effective_recurrent*self.binary_tensor.to(self.device)
-        
-        trace_in_v = torch.zeros(batch_size, self.n_in, device=self.device)
-        trace_rec_v = torch.zeros(batch_size, self.n_hidden, device=self.device)
+        out_mem = out_spike = torch.zeros(batch_size, self.n_out, device=self.device)
 
-        trace_out_t = torch.zeros(batch_size, self.n_hidden, device=self.device) 
+        # Pre-h alpha-filtered traces
+        trace_in_pre = torch.zeros(batch_size, self.n_in, device=self.device)
+        trace_rec_pre = torch.zeros(batch_size, self.n_hidden, device=self.device)
+
+        # Eligibility traces (kappa-filtered after multiplication with h_t)
+        elig_in = torch.zeros(batch_size, self.n_hidden, self.n_in, device=self.device)
+        elig_rec = torch.zeros(batch_size, self.n_hidden, self.n_hidden, device=self.device)
+
+        # Output trace (kappa-filtered hidden spikes)
+        trace_out_t = torch.zeros(batch_size, self.n_hidden, device=self.device)
+
+        # z_{t-1} for trace_rec (matches minsik's [:, :, :n_t] slicing)
+        prev_hidden_spike = torch.zeros(batch_size, self.n_hidden, device=self.device)
 
         for step in range(num_steps):
-            input_spike = x[:, step,:]
+            input_spike = x[:, step, :]
+
             if self.recurrent_connection is True:
-                hidden_mem, hidden_spike = self.LIF0(hidden_mem, hidden_spike, self.init_tau,self.fc1(input_spike)+torch.mm(hidden_spike, self.recurrent))
-            else : 
-                hidden_mem, hidden_spike = self.LIF0(hidden_mem, hidden_spike, self.init_tau,self.fc1(input_spike))
+                hidden_mem, hidden_spike = self.LIF0(
+                    hidden_mem, hidden_spike, self.init_tau,
+                    self.fc1(input_spike) + torch.mm(hidden_spike, self.recurrent)
+                )
+            else:
+                hidden_mem, hidden_spike = self.LIF0(
+                    hidden_mem, hidden_spike, self.init_tau, self.fc1(input_spike)
+                )
 
-            out_mem, out_spike = self.out_node(out_mem, out_spike, self.init_tau, self.out(hidden_spike))
+            out_mem, out_spike = self.out_node(
+                out_mem, out_spike, self.init_tau, self.out(hidden_spike)
+            )
 
-            err = (out_spike - label[:,step,:])
+            err = out_spike - label[:, step, :]
 
-            trace_in_v = self.init_tau * trace_in_v + input_spike
-            trace_rec_v = self.init_tau * trace_rec_v + hidden_spike
+            # Surrogate derivative: minsik uses init_tau * max(0, 1 - |v-thr|/thr)
+            h_t = self.init_tau * torch.max(
+                torch.zeros_like(hidden_mem),
+                1 - torch.abs((hidden_mem - self.thr) / self.thr)
+            )
+
+            # Alpha-filtered pre-h traces
+            # trace_in uses x[t]; trace_rec uses z[t-1] to match minsik
+            trace_in_pre = self.init_tau * trace_in_pre + input_spike
+            trace_rec_pre = self.init_tau * trace_rec_pre + prev_hidden_spike
+
+            # Kappa-filtered eligibility traces
+            elig_in = self.tau_o * elig_in + torch.einsum('br,bi->bri', h_t, trace_in_pre)
+            elig_rec = self.tau_o * elig_rec + torch.einsum('br,bj->brj', h_t, trace_rec_pre)
+
+            # Output trace (kappa-filtered z[t])
             trace_out_t = self.tau_o * trace_out_t + hidden_spike
-            h_t = self.gamma * torch.max(torch.zeros_like(hidden_mem), 1 - torch.abs((hidden_mem - self.thr) / self.thr))
 
-            trace_in = torch.einsum('br,bi->bri', h_t, trace_in_v)
-            trace_rec = torch.einsum('br,bi->bri', h_t, trace_rec_v)
-            
+            # Learning signal
             L = torch.einsum('bo,or->br', err, self.out.weight)
 
-            self.fc1.weight.grad += 0.01 * torch.sum(L.unsqueeze(2) * trace_in, dim=(0))
-            self.recurrent.grad += 0.01 * torch.sum(L.unsqueeze(2) * trace_rec, dim=(0))
-            self.out.weight.grad += 0.01 * torch.einsum('bo,br->or', err, trace_out_t)
+            # Gradient updates (factor 0.05 matches Basic_RSNN_eprop_minsik)
+            self.fc1.weight.grad += 0.05 * torch.sum(L.unsqueeze(2) * elig_in, dim=0)
+            self.recurrent.grad += 0.05 * torch.sum(L.unsqueeze(2) * elig_rec, dim=0)
+            self.out.weight.grad += 0.05 * torch.einsum('bo,br->or', err, trace_out_t)
+
+            prev_hidden_spike = hidden_spike.clone()
 
             self.outputs.append(out_spike)
             self.hidden_mem_list.append(hidden_mem)
@@ -1640,15 +1692,38 @@ class Basic_RSNN_eprop_HW_forward(nn.Module):
         baud_rate: int = 115200,
         bit_length: int = 10,
         use_mock_hw: bool = False,
+        # When >0, the mock interface encodes each probability as a Bernoulli
+        # bit stream of this length instead of using the exact product, so the
+        # update is quantised to multiples of 1/bit_length. Isolates the
+        # stochastic encoding from every other device effect.
+        mock_quantize_bits: int = 0,
+        mock_quantize_seed: int = 0,
         normalization_scale: float = 1.0,
         adc_to_grad_scale: float = 0.001,
+        auto_calibrate_scale: bool = True,
+        calibrate_ema: float = 0.5,
+        # Pulse/read timing forwarded to MemristorInterface. Defaults are the
+        # operating point validated by the 2026-08-05 uv_grid_sweep
+        # (r ~ 0.92 at BL=10): width 15 us, read_time 20. The interface's own
+        # defaults (width=1) were never validated and give ~1/10 the charge
+        # per coincidence.
+        pulse_width: int = 15,
+        pulse_pre: int = 100,
+        pulse_post: int = 100,
+        pulse_zero: int = 10,
+        read_time: int = 20,
+        read_delay: int = 10,
+        no_read_updates: bool = False,
+        dno: bool = False,
     ):
         super().__init__()
 
-        # Validate hardware constraints
-        if n_hidden != 5 or n_out != 5:
+        # Validate hardware constraints: the array is physically 5x5; a
+        # smaller model maps onto its top-left block (rows = outputs,
+        # columns = hidden). Used since the 2026-08-24 column-5 fault (4x4).
+        if not (1 <= n_hidden <= 5) or not (1 <= n_out <= 5):
             raise ValueError(
-                f"n_hidden and n_out must be 5 for 5x5 hardware. "
+                f"n_hidden and n_out must be in 1..5 for the 5x5 hardware. "
                 f"Got n_hidden={n_hidden}, n_out={n_out}"
             )
 
@@ -1672,24 +1747,39 @@ class Basic_RSNN_eprop_HW_forward(nn.Module):
         self.normalization_scale = normalization_scale
         self.adc_to_grad_scale = adc_to_grad_scale
 
+        # Auto-calibration of adc_to_grad_scale
+        self.auto_calibrate_scale = auto_calibrate_scale
+        self.calibrate_ema = calibrate_ema       # 0=keep old, 1=replace fully
+        self._calibrated_once = False
+
         # Running max for normalization
         self.running_max_err = 1e-8
         self.running_max_trace = 1e-8
 
         # Initialize hardware interface
         if hw_enabled:
-            from snn_pattern_learning.hardware import MemristorInterface, MockMemristorInterface
+            from hardware import MemristorInterface, MockMemristorInterface
             if use_mock_hw:
                 self.hw_interface = MockMemristorInterface(
                     port=serial_port,
                     baud_rate=baud_rate,
-                    bit_length=bit_length
+                    bit_length=bit_length,
+                    quantize_bits=mock_quantize_bits,
+                    quantize_seed=mock_quantize_seed,
                 )
             else:
                 self.hw_interface = MemristorInterface(
                     port=serial_port,
                     baud_rate=baud_rate,
-                    bit_length=bit_length
+                    bit_length=bit_length,
+                    pulse_width=pulse_width,
+                    pulse_pre=pulse_pre,
+                    pulse_post=pulse_post,
+                    pulse_zero=pulse_zero,
+                    read_time=read_time,
+                    read_delay=read_delay,
+                    no_read_updates=no_read_updates,
+                    dno=dno,
                 )
         else:
             self.hw_interface = None
@@ -1708,9 +1798,48 @@ class Basic_RSNN_eprop_HW_forward(nn.Module):
         init.kaiming_normal_(self.out.weight)
         self.out.weight.data *= 0.5
 
-        self.LIF0 = LIF_Node(surrogate_function=TriangleCall())
-        self.out_node = LIF_Node(surrogate_function=TriangleCall())
+        # Same threshold-alignment fix as Basic_RSNN_eprop_forward: without
+        # initial_thresh the node fires at LIF_Node's default 0.5 while
+        # init_thresh only shapes the e-prop pseudo-derivative.
+        self.LIF0 = LIF_Node(surrogate_function=HeavisideBoxcarCall(),
+                             initial_thresh=init_thresh)
+        self.out_node = LIF_Node(surrogate_function=HeavisideBoxcarCall(),
+                                 initial_thresh=init_thresh)
         self.mask = torch.ones(self.n_hidden, self.n_hidden) - torch.eye(self.n_hidden)
+
+        # Optional learning window (t0, t1): when set, the error signal (and
+        # therefore every weight update, hardware and software) is zeroed
+        # outside these timesteps. For classification-style tasks whose
+        # decision only reads a response window, spikes outside the window
+        # are unconstrained -- forcing them to match the (all-zero) target
+        # creates an unreachable objective and the training limit-cycles.
+        # None (default) keeps the original behaviour.
+        self.err_window = None
+
+        # When True, per-timestep outer products are queued and flushed to
+        # the hardware quadrant-major at apply_hw_gradient() time instead of
+        # being sent immediately. This reduces P<->D command alternation on
+        # shared lines from O(timesteps) to 3 per epoch, which the XOR runs
+        # showed can otherwise cancel a mixed-sign column's accumulated
+        # gradient via alternating half-select programming. Default False
+        # keeps the original streaming behaviour.
+        self.hw_batch_quadrants = False
+        self._hw_queue = []
+
+        # Optional fixed normalization constants (err_max, trace_max).
+        # The default running-max normalization rescales each timestep by a
+        # DIFFERENT factor as the max grows within the epoch, so the
+        # accumulated outer product is a distorted version of the true
+        # gradient sum -- measured on the perfect-raster teacher task this
+        # distortion alone kept even the exact mock pipeline from converging
+        # (best raster_err 3 vs 0). With fixed constants every timestep is
+        # scaled identically and the accumulation is exact up to one global
+        # factor, which auto-calibration absorbs. None keeps the original
+        # running-max behaviour.
+        self.fixed_norm = None
+
+        # For gradient comparison (software vs hardware)
+        self.desired_gradient_accumulated = torch.zeros(n_out, n_hidden)
 
     def connect_hardware(self) -> bool:
         """Connect to hardware. Call before training."""
@@ -1723,13 +1852,21 @@ class Basic_RSNN_eprop_HW_forward(nn.Module):
         if self.hw_interface is not None:
             self.hw_interface.disconnect()
 
-    def reset_hardware(self) -> bool:
-        """Reset hardware state. Call at epoch start."""
+    def reset_hardware(self, hard_reset: bool = True) -> bool:
+        """Reset hardware state. Call at epoch start.
+
+        Args:
+            hard_reset: If True, send a physical Reset command to the device
+                before measuring the new reference point. This pushes all
+                cells back toward baseline conductance and prevents cumulative
+                saturation across epochs.
+        """
         if self.hw_interface is not None:
-            success = self.hw_interface.reset()
+            success = self.hw_interface.reset(hard_reset=hard_reset)
             # Reset running normalization stats
             self.running_max_err = 1e-8
             self.running_max_trace = 1e-8
+            self._hw_queue = []
             return success
         return False
 
@@ -1774,13 +1911,18 @@ class Basic_RSNN_eprop_HW_forward(nn.Module):
         err_abs = torch.abs(err_avg)
         trace_abs = torch.abs(trace_avg)
 
-        # Update running max
-        self.running_max_err = max(self.running_max_err, err_abs.max().item())
-        self.running_max_trace = max(self.running_max_trace, trace_abs.max().item())
+        if self.fixed_norm is not None:
+            err_max, trace_max = self.fixed_norm
+        else:
+            # Update running max
+            self.running_max_err = max(self.running_max_err, err_abs.max().item())
+            self.running_max_trace = max(self.running_max_trace, trace_abs.max().item())
+            err_max = self.running_max_err
+            trace_max = self.running_max_trace
 
         # Normalize to [0, 1]
-        err_probs = (err_abs / self.running_max_err).clamp(0, 1)
-        trace_probs = (trace_abs / self.running_max_trace).clamp(0, 1)
+        err_probs = (err_abs / err_max).clamp(0, 1)
+        trace_probs = (trace_abs / trace_max).clamp(0, 1)
 
         # Apply scaling factor
         err_probs = err_probs * self.normalization_scale
@@ -1799,9 +1941,9 @@ class Basic_RSNN_eprop_HW_forward(nn.Module):
         trace_out_t: torch.Tensor
     ):
         """
-        Send vectors to hardware for outer product computation.
-
-        Decomposes the update into POTENTIATION and DEPRESSION based on signs.
+        Send the per-timestep outer product err ⊗ trace_out_t to the memristor
+        crossbar. The 4-quadrant sign decomposition is handled inside
+        MemristorInterface.accumulate_outer_product().
 
         Args:
             err: Error signal tensor of shape (batch, n_out)
@@ -1814,45 +1956,33 @@ class Basic_RSNN_eprop_HW_forward(nn.Module):
             err, trace_out_t
         )
 
-        # Compute sign matrix for outer product
-        # sign_matrix[o, r] = sign(err[o]) * sign(trace[r])
-        sign_matrix = torch.outer(err_signs, trace_signs)  # (n_out, n_hidden)
-
-        # Count positive and negative elements
-        pos_count = (sign_matrix > 0).sum().item()
-        neg_count = (sign_matrix < 0).sum().item()
-
-        # Send POTENTIATION update for positive elements
-        if pos_count > 0:
-            self.hw_interface.send_outer_product_update(
-                err_probs,
-                trace_probs,
-                direction='POTENTIATION'
-            )
-
-        # Send DEPRESSION update for negative elements
-        # For depression, we need to invert the signs conceptually
-        if neg_count > 0:
-            # Apply sign adjustment for depression
-            err_probs_neg = err_probs.copy()
-            trace_probs_neg = trace_probs.copy()
-
-            # Where err_sign is negative, use those values for depression
-            for i in range(len(err_signs)):
-                if err_signs[i] < 0:
-                    err_probs_neg[i] = err_probs[i]
-                else:
-                    err_probs_neg[i] = 0
-
-            self.hw_interface.send_outer_product_update(
-                err_probs_neg,
-                trace_probs,
-                direction='DEPRESSION'
-            )
+        u_p = err_probs.astype(np.float32)
+        v_p = trace_probs.astype(np.float32)
+        u_s = err_signs.detach().cpu().numpy().astype(np.float32)
+        v_s = trace_signs.detach().cpu().numpy().astype(np.float32)
+        # The array is physically 5x5; a smaller model (e.g. 4x4 after the
+        # 2026-08-24 column-5 fault) uses the top-left block. Pad the unused
+        # rows/columns with probability 0 so they never receive pulses
+        # (single-line half-select is negligible, measured 2026-08-05).
+        if u_p.size < 5:
+            u_p = np.pad(u_p, (0, 5 - u_p.size))
+            u_s = np.pad(u_s, (0, 5 - u_s.size), constant_values=1.0)
+        if v_p.size < 5:
+            v_p = np.pad(v_p, (0, 5 - v_p.size))
+            v_s = np.pad(v_s, (0, 5 - v_s.size), constant_values=1.0)
+        item = (u_p, v_p, u_s, v_s)
+        if self.hw_batch_quadrants:
+            self._hw_queue.append(item)
+        else:
+            self.hw_interface.accumulate_outer_product(*item)
 
     def forward(self, x, label, training):
         """
         Forward pass with optional hardware gradient accumulation.
+
+        E-prop algorithm matches Basic_RSNN_eprop_forward exactly. The output
+        layer gradient (err ⊗ trace_out_t outer product) is accumulated on the
+        memristor crossbar each timestep when training and hardware is enabled.
 
         Args:
             x: Input tensor of shape (batch, time, n_in)
@@ -1864,7 +1994,6 @@ class Basic_RSNN_eprop_HW_forward(nn.Module):
         """
         self.device = x.device
         self.init_net()
-
         self.hidden_mem_list = []
         self.hidden_spike_list = []
         self.outputs = []
@@ -1875,60 +2004,79 @@ class Basic_RSNN_eprop_HW_forward(nn.Module):
         hidden_mem = hidden_spike = torch.zeros(batch_size, self.n_hidden, device=self.device)
         out_mem = out_spike = torch.zeros(batch_size, self.n_out, device=self.device)
 
-        trace_in_v = torch.zeros(batch_size, self.n_in, device=self.device)
-        trace_rec_v = torch.zeros(batch_size, self.n_hidden, device=self.device)
+        # Pre-h alpha-filtered traces
+        trace_in_pre = torch.zeros(batch_size, self.n_in, device=self.device)
+        trace_rec_pre = torch.zeros(batch_size, self.n_hidden, device=self.device)
+
+        # Eligibility traces (kappa-filtered after multiplication with h_t)
+        elig_in = torch.zeros(batch_size, self.n_hidden, self.n_in, device=self.device)
+        elig_rec = torch.zeros(batch_size, self.n_hidden, self.n_hidden, device=self.device)
+
+        # Output trace (kappa-filtered hidden spikes)
         trace_out_t = torch.zeros(batch_size, self.n_hidden, device=self.device)
+
+        # z_{t-1} for trace_rec
+        prev_hidden_spike = torch.zeros(batch_size, self.n_hidden, device=self.device)
 
         for step in range(num_steps):
             input_spike = x[:, step, :]
 
-            # Hidden layer dynamics
             if self.recurrent_connection:
-                hidden_input = self.fc1(input_spike) + torch.mm(hidden_spike, self.recurrent)
+                hidden_mem, hidden_spike = self.LIF0(
+                    hidden_mem, hidden_spike, self.init_tau,
+                    self.fc1(input_spike) + torch.mm(hidden_spike, self.recurrent)
+                )
             else:
-                hidden_input = self.fc1(input_spike)
+                hidden_mem, hidden_spike = self.LIF0(
+                    hidden_mem, hidden_spike, self.init_tau, self.fc1(input_spike)
+                )
 
-            hidden_mem, hidden_spike = self.LIF0(
-                hidden_mem, hidden_spike, self.init_tau, hidden_input
-            )
-
-            # Output layer dynamics
             out_mem, out_spike = self.out_node(
                 out_mem, out_spike, self.init_tau, self.out(hidden_spike)
             )
 
-            # Error signal
             err = out_spike - label[:, step, :]
+            if self.err_window is not None and not \
+                    (self.err_window[0] <= step < self.err_window[1]):
+                err = torch.zeros_like(err)
 
-            # Update eligibility traces
-            trace_in_v = self.init_tau * trace_in_v + input_spike
-            trace_rec_v = self.init_tau * trace_rec_v + hidden_spike
-            trace_out_t = self.tau_o * trace_out_t + hidden_spike
-
-            # Surrogate derivative
-            h_t = self.gamma * torch.max(
+            # Surrogate derivative: init_tau * max(0, 1 - |v-thr|/thr)
+            h_t = self.init_tau * torch.max(
                 torch.zeros_like(hidden_mem),
                 1 - torch.abs((hidden_mem - self.thr) / self.thr)
             )
 
-            # Compute eligibility traces for hidden layers
-            trace_in = torch.einsum('br,bi->bri', h_t, trace_in_v)
-            trace_rec = torch.einsum('br,bi->bri', h_t, trace_rec_v)
+            # Alpha-filtered pre-h traces (trace_rec uses z[t-1])
+            trace_in_pre = self.init_tau * trace_in_pre + input_spike
+            trace_rec_pre = self.init_tau * trace_rec_pre + prev_hidden_spike
 
-            # Learning signal for hidden layers
+            # Kappa-filtered eligibility traces
+            elig_in = self.tau_o * elig_in + torch.einsum('br,bi->bri', h_t, trace_in_pre)
+            elig_rec = self.tau_o * elig_rec + torch.einsum('br,bj->brj', h_t, trace_rec_pre)
+
+            # Output trace (kappa-filtered z[t])
+            trace_out_t = self.tau_o * trace_out_t + hidden_spike
+
+            # Learning signal
             L = torch.einsum('bo,or->br', err, self.out.weight)
 
-            # Hidden layer gradients (always software)
-            self.fc1.weight.grad += 0.01 * torch.sum(L.unsqueeze(2) * trace_in, dim=0)
-            self.recurrent.grad += 0.01 * torch.sum(L.unsqueeze(2) * trace_rec, dim=0)
+            # Hidden-layer gradients (always software, factor 0.05 matches minsik)
+            self.fc1.weight.grad += 0.05 * torch.sum(L.unsqueeze(2) * elig_in, dim=0)
+            self.recurrent.grad += 0.05 * torch.sum(L.unsqueeze(2) * elig_rec, dim=0)
 
-            # Output layer gradient
+            # Output-layer gradient: outer product err ⊗ trace_out_t
+            # Software-mirrored desired gradient (accumulated for HW comparison)
+            desired_step_grad = 0.05 * torch.einsum('bo,br->or', err, trace_out_t)
+
             if training and self.hw_enabled and self.hw_interface is not None:
-                # Send to hardware for outer product computation
+                # Send the per-timestep outer product to the memristor crossbar
+                self.desired_gradient_accumulated += desired_step_grad
                 self.send_to_hardware(err, trace_out_t)
             else:
-                # Software fallback
-                self.out.weight.grad += 0.01 * torch.einsum('bo,br->or', err, trace_out_t)
+                # Software fallback: accumulate directly into out.weight.grad
+                self.out.weight.grad += desired_step_grad
+
+            prev_hidden_spike = hidden_spike.clone()
 
             self.outputs.append(out_spike)
             self.hidden_mem_list.append(hidden_mem)
@@ -1943,7 +2091,8 @@ class Basic_RSNN_eprop_HW_forward(nn.Module):
         Call at the end of each epoch to:
         1. Read accumulated gradient from hardware
         2. Convert ADC values to gradient scale
-        3. Apply to software weights
+        3. Compare with desired (software) gradient
+        4. Apply to software weights
 
         Args:
             learning_rate: Learning rate for weight update
@@ -1951,8 +2100,24 @@ class Basic_RSNN_eprop_HW_forward(nn.Module):
         if not self.hw_enabled or self.hw_interface is None:
             return
 
-        # Read accumulated gradient from hardware
-        hw_gradient_adc = self.hw_interface.read_accumulated_gradient()  # (5, 5)
+        # Ablation switch: freeze W_out at its init values. In HW mode the
+        # forward pass never touches out.weight.grad (gradients go to the
+        # accumulator), so skipping this method leaves the output layer
+        # completely untrained while fc1/recurrent still learn through the
+        # optimizer. Used to isolate how much of the loss drop the
+        # (analog-trained) output layer actually contributes.
+        if getattr(self, 'freeze_wout', False):
+            return
+
+        # Flush queued outer products quadrant-major (no-op if not batching)
+        if self.hw_batch_quadrants and self._hw_queue:
+            self.hw_interface.accumulate_outer_products_grouped(self._hw_queue)
+            self._hw_queue = []
+
+        # Read accumulated gradient from hardware; the physical array is
+        # (5, 5) -- a smaller model reads its top-left (n_out, n_hidden) block
+        hw_gradient_adc = self.hw_interface.read_accumulated_gradient()
+        hw_gradient_adc = hw_gradient_adc[: self.n_out, : self.n_hidden]
 
         # Convert ADC to gradient scale
         hw_gradient = torch.tensor(
@@ -1961,9 +2126,145 @@ class Basic_RSNN_eprop_HW_forward(nn.Module):
             device=self.device
         )
 
+        # Compare with desired gradient
+        import logging
+        logger = logging.getLogger(__name__)
+
+        logger.info("\n" + "="*70)
+        logger.info("GRADIENT COMPARISON: Desired (Software) vs Hardware")
+        logger.info("="*70)
+
+        logger.info("\n[Desired Gradient (Software)]:")
+        logger.info(f"{self.desired_gradient_accumulated.detach().cpu().numpy()}")
+
+        logger.info("\n[Hardware Gradient (Raw ADC)]:")
+        logger.info(f"{hw_gradient_adc}")
+
+        logger.info("\n[Hardware Gradient (Scaled)]:")
+        logger.info(f"{hw_gradient.detach().cpu().numpy()}")
+
+        # Calculate difference
+        diff = self.desired_gradient_accumulated - hw_gradient
+        logger.info("\n[Difference (Desired - Hardware)]:")
+        logger.info(f"{diff.detach().cpu().numpy()}")
+
+        # Calculate statistics
+        mse = torch.mean(diff ** 2).item()
+        mae = torch.mean(torch.abs(diff)).item()
+        corr = torch.corrcoef(torch.stack([
+            self.desired_gradient_accumulated.flatten(),
+            hw_gradient.flatten()
+        ]))[0, 1].item() if torch.sum(hw_gradient**2) > 0 else 0.0
+
+        logger.info(f"\n[Statistics]:")
+        logger.info(f"  MSE (Mean Squared Error): {mse:.6f}")
+        logger.info(f"  MAE (Mean Absolute Error): {mae:.6f}")
+        logger.info(f"  Correlation Coefficient: {corr:.4f}")
+        logger.info("="*70 + "\n")
+
+        # Auto-calibrate adc_to_grad_scale by matching mean magnitudes.
+        # We want:  scale * mean|hw_adc|  ≈  mean|sw_grad|
+        # so:       scale_target = mean|sw_grad| / mean|hw_adc|
+        # First pass replaces fully; later passes use EMA for stability.
+        if self.auto_calibrate_scale:
+            sw_mag = float(torch.abs(self.desired_gradient_accumulated).mean().item())
+            hw_mag = float(np.abs(hw_gradient_adc).mean())
+            if hw_mag > 1e-9 and sw_mag > 1e-9:
+                scale_target = sw_mag / hw_mag
+                if not self._calibrated_once:
+                    new_scale = scale_target
+                    self._calibrated_once = True
+                else:
+                    a = self.calibrate_ema
+                    new_scale = (1 - a) * self.adc_to_grad_scale + a * scale_target
+                logger.info(
+                    f"[CALIBRATE] sw_mag={sw_mag:.4f}, hw_adc_mag={hw_mag:.4f}, "
+                    f"target_scale={scale_target:.6f}, "
+                    f"adc_to_grad_scale {self.adc_to_grad_scale:.6f} -> {new_scale:.6f}"
+                )
+                self.adc_to_grad_scale = new_scale
+                # Recompute hw_gradient with the updated scale before the
+                # weight update so this epoch already benefits from calibration
+                hw_gradient = torch.tensor(
+                    hw_gradient_adc * self.adc_to_grad_scale,
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+            else:
+                logger.info(
+                    f"[CALIBRATE] skipped (sw_mag={sw_mag:.2e}, hw_adc_mag={hw_mag:.2e})"
+                )
+
+        # Optional per-column gain calibration on top of the global scale.
+        # Measured on the XOR runs (2026-08-10): stable per-column gain
+        # spread of ~3.7x (weakest column 0.6, strongest 2.2 relative to
+        # desired), i.e. the effective learning rate differs per hidden
+        # neuron. A single global scale cannot equalize this; five EMA
+        # scalars can. Enable with model.calibrate_per_column = True.
+        if getattr(self, 'calibrate_per_column', False):
+            sw_col = self.desired_gradient_accumulated.abs().mean(dim=0)
+            sw_col = sw_col.detach().cpu().numpy()          # (n_hidden,)
+            hw_col = np.abs(hw_gradient_adc).mean(axis=0)   # (n_hidden,)
+            if not hasattr(self, '_col_gain') or self._col_gain is None:
+                self._col_gain = np.ones(self.n_hidden, dtype=np.float64)
+            for j in range(self.n_hidden):
+                if hw_col[j] > 1e-9 and sw_col[j] > 1e-9:
+                    # relative gain vs the global scale already applied
+                    target = (sw_col[j] / hw_col[j]) / self.adc_to_grad_scale
+                    a = self.calibrate_ema
+                    self._col_gain[j] = ((1 - a) * self._col_gain[j]
+                                         + a * target)
+            # clamp: never boost a column more than 5x or cut below 0.2x,
+            # so a noise-floor column cannot blow up the update
+            col_gain = np.clip(self._col_gain, 0.2, 5.0)
+            logger.info(f"[CALIBRATE-COL] gains: {np.round(col_gain, 3)}")
+            hw_gradient = torch.tensor(
+                hw_gradient_adc * self.adc_to_grad_scale * col_gain[None, :],
+                dtype=torch.float32, device=self.device,
+            )
+
+        # Per-cell record of what the algorithm asked for versus what the
+        # crossbar returned, appended once per epoch. The text log above
+        # prints the same matrices but cannot be analysed afterwards; this
+        # keeps every one of the 25 weights so correlation, per-cell gain and
+        # drift over epochs can be reconstructed.
+        if getattr(self, "grad_log_path", None):
+            import csv as _csv
+            import os as _os
+            desired_np = self.desired_gradient_accumulated.detach().cpu().numpy()
+            hw_np = hw_gradient.detach().cpu().numpy()
+            new_file = not _os.path.exists(self.grad_log_path)
+            with open(self.grad_log_path, "a", newline="",
+                      encoding="utf-8") as _f:
+                w = _csv.writer(_f)
+                if new_file:
+                    w.writerow(["epoch", "row", "col", "desired", "hw_adc",
+                                "hw_scaled", "adc_to_grad_scale"])
+                ep = getattr(self, "grad_log_epoch", 0)
+                for i in range(desired_np.shape[0]):
+                    for j in range(desired_np.shape[1]):
+                        w.writerow([ep, i + 1, j + 1,
+                                    float(desired_np[i, j]),
+                                    float(hw_gradient_adc[i, j]),
+                                    float(hw_np[i, j]),
+                                    float(self.adc_to_grad_scale)])
+            self.grad_log_epoch = ep + 1
+
+        # Reset desired gradient accumulator for next epoch
+        self.desired_gradient_accumulated.zero_()
+
         # Apply to software weights (gradient descent)
+        weight_before = self.out.weight.data.clone()
         with torch.no_grad():
             self.out.weight.data -= learning_rate * hw_gradient
+        weight_change = (self.out.weight.data - weight_before).abs().max().item()
+
+        logger.info(f"\n[WEIGHT UPDATE] Learning rate={learning_rate}, Max weight change={weight_change:.6f}")
+        logger.info(f"[WEIGHT UPDATE] Weight range: [{self.out.weight.data.min():.4f}, {self.out.weight.data.max():.4f}]")
+
+        # Returned so callers can feed the hardware gradient into their own
+        # optimizer instead (pass learning_rate=0 to skip the direct write).
+        return hw_gradient
 
     def get_hw_gradient(self) -> np.ndarray:
         """Get the current accumulated gradient from hardware (for debugging)."""
