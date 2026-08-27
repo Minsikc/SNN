@@ -112,6 +112,7 @@ class BaseExperiment(ABC):
             train: Override train/test split. If None, uses config value.
         """
         dataset_type = self.config.get('dataset.type')
+        dataset_seed = self.config.get('dataset.seed', None)
 
         # Use provided train parameter or fall back to config
         is_train = train if train is not None else self.config.get('dataset.train', True)
@@ -122,7 +123,8 @@ class BaseExperiment(ABC):
                 sequence_length=self.config.get('dataset.sequence_length', 100),
                 input_size=self.config.get('model.n_in', 50),
                 output_size=self.config.get('model.n_out', 10),
-                spike_prob=self.config.get('dataset.spike_prob', 0.1)
+                spike_prob=self.config.get('dataset.spike_prob', 0.1),
+                seed=dataset_seed
             )
         elif dataset_type == "CustomSpikeDataset_Teacher":
             return CustomSpikeDataset_Teacher(
@@ -161,7 +163,8 @@ class BaseExperiment(ABC):
                 input_size=self.config.get('model.n_in', 50),
                 output_size=self.config.get('model.n_out', 10),
                 input_spike_prob=self.config.get('dataset.spike_prob', 0.1),
-                target_spike_prob=self.config.get('dataset.spike_prob', 0.1) / 2
+                target_spike_prob=self.config.get('dataset.spike_prob', 0.1) / 2,
+                seed=dataset_seed
             )
         elif dataset_type == "SuperSpikePatternDataset":
             return SuperSpikePatternDataset(
@@ -169,7 +172,8 @@ class BaseExperiment(ABC):
                 sequence_length=self.config.get('dataset.sequence_length', 100),
                 input_size=self.config.get('model.n_in', 50),
                 output_size=self.config.get('model.n_out', 10),
-                input_spike_prob=self.config.get('dataset.spike_prob', 0.1)
+                input_spike_prob=self.config.get('dataset.spike_prob', 0.1),
+                seed=dataset_seed
             )
         elif dataset_type == "NMNISTDataset":
             return NMNISTDataset(

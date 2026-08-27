@@ -23,9 +23,9 @@ neuron:
     gamma: 0.3
     width: 1
   boxcar:
-    thresh: 0.4
-    subthresh: 0.1
-    alpha: 1.0
+    thresh: 0.45
+    subthresh: 0.4
+    alpha: 0.8
 
 # Dataset parameters
 dataset:
@@ -34,6 +34,7 @@ dataset:
   sequence_length: 100
   spike_prob: 0.1
   total_spike: 5
+  seed: 42  # Random seed for dataset generation
 
 # Training parameters
 training:

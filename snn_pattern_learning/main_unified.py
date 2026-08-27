@@ -9,20 +9,29 @@ import os
 import sys
 import yaml
 from pathlib import Path
+import torch
+import numpy as np
+import random
 
 # Add current directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from configs.config_loader import load_config, get_available_configs
-from experiment_types import BasicExperiment, TeacherStudentExperiment, WeightInitExperiment, StatisticalAblationExperiment
+from experiment_types import (
+    BasicExperiment,
+    TeacherStudentExperiment,
+    WeightInitExperiment,
+    StatisticalAblationExperiment,
+    ClassificationExperiment
+)
 
-# Try to import ClassificationExperiment, but make it optional
+# Optional: origin/main (eefcc23) imports this module unconditionally, but the
+# file was never committed. Keep the experiment type available when the module
+# exists without breaking every other experiment when it does not.
 try:
-    from experiment_types.classification_experiment import ClassificationExperiment
-    HAS_CLASSIFICATION = True
+    from experiment_types.teacher_student_noise_init import TeacherStudentNoiseInitExperiment
 except ImportError:
-    ClassificationExperiment = None
-    HAS_CLASSIFICATION = False
+    TeacherStudentNoiseInitExperiment = None
 
 
 def parse_arguments():
@@ -32,7 +41,7 @@ def parse_arguments():
     parser.add_argument('--config', type=str, default='default.yaml',
                        help='Configuration file name (default: default.yaml)')
     parser.add_argument('--experiment_type', type=str,
-                       choices=['basic', 'teacher_student', 'weight_init', 'statistical_ablation', 'classification'],
+                       choices=['basic', 'teacher_student', 'weight_init', 'statistical_ablation', 'classification', 'teacher_student_noise_init'],
                        help='Override experiment type from config')
     parser.add_argument('--name', type=str, help='Override experiment name')
     parser.add_argument('--epochs', type=int, help='Override number of epochs')
@@ -81,10 +90,11 @@ def create_experiment(config):
     elif experiment_type == 'statistical_ablation':
         return StatisticalAblationExperiment(config)
     elif experiment_type == 'classification':
-        if HAS_CLASSIFICATION:
-            return ClassificationExperiment(config)
-        else:
-            raise ValueError("Classification experiment not available")
+        return ClassificationExperiment(config)
+    elif experiment_type == 'teacher_student_noise_init':
+        if TeacherStudentNoiseInitExperiment is None:
+            raise ValueError("experiment_types/teacher_student_noise_init.py is not present in this checkout")
+        return TeacherStudentNoiseInitExperiment(config)
     else:
         raise ValueError(f"Unsupported experiment type: {experiment_type}")
 

@@ -1,0 +1,56 @@
+# N-MNIST Classification with E-prop Configuration
+# Uses eligibility propagation instead of BPTT
+
+# Experiment settings
+experiment:
+  type: "classification"
+  name: "nmnist_classification_eprop"
+  save_results: true
+  results_dir: "results"
+
+# Model parameters - E-prop model (Basic_RSNN_eprop_minsik)
+model:
+  type: "RSNN_eprop"
+  n_in: 2312
+  n_hidden: 64
+  n_out: 10
+  neuron_type: "triangular"
+
+# Neuron parameters
+neuron:
+  triangular:
+    thresh: 0.6
+    subthresh: 0.25
+    gamma: 0.3
+    width: 1
+  boxcar:
+    thresh: 0.4
+    subthresh: 0.1
+    alpha: 1.0
+
+# Dataset parameters
+dataset:
+  type: "NMNISTDatasetClassification"
+  root: "./data"
+  train: true
+  time_window: 1000.0
+  sequence_length: 100
+  flatten: true
+  max_samples: 200  # 빠른 테스트를 위해 샘플 수 제한
+
+# Training parameters
+training:
+  batch_size: 8
+  learning_rate: 0.001
+  epochs: 5
+  optimizer: "Adam"
+
+# Logging and visualization
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"
+  use_wandb: false  # Set to true to enable wandb logging
+  wandb_project: "snn-nmnist-eprop"  # wandb project name

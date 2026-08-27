@@ -1,0 +1,56 @@
+# N-MNIST Classification Configuration
+# Uses cumulative spike counts with CrossEntropyLoss
+
+# Experiment settings
+experiment:
+  type: "classification"
+  name: "nmnist_classification"
+  save_results: true
+  results_dir: "results"
+
+# Model parameters - N-MNIST (input_size: 34*34*2 = 2312, output: 10 classes)
+model:
+  type: "Basic_RSNN_spike"
+  n_in: 2312
+  n_hidden: 128
+  n_out: 10
+  neuron_type: "triangular"
+
+# Neuron parameters
+neuron:
+  triangular:
+    thresh: 0.6
+    subthresh: 0.25
+    gamma: 0.3
+    width: 1
+  boxcar:
+    thresh: 0.4
+    subthresh: 0.1
+    alpha: 1.0
+
+# Dataset parameters
+dataset:
+  type: "NMNISTDatasetClassification"
+  root: "./data"
+  train: true
+  time_window: 1000.0
+  sequence_length: 100
+  flatten: true
+  # max_samples: 1000  # 전체 데이터셋 사용
+
+# Training parameters
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  epochs: 20
+  optimizer: "Adam"
+
+# Logging and visualization
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"
+  use_wandb: false  # Set to true to enable wandb logging
+  wandb_project: "snn-nmnist-bptt"  # wandb project name
