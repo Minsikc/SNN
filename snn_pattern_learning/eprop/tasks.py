@@ -27,7 +27,7 @@ def build_teacher_task(task: TaskConfig, neuron: NeuronConfig):
         output_size=task.n_out, hidden_size=task.n_hidden, spike_prob=task.spike_prob,
         teacher_thresh=neuron.thresh, teacher_tau=neuron.tau, w_scale=task.w_scale,
         seed=task.ds_seed,
-        beta=neuron.beta if neuron.adaptive else 0.0,
+        beta=neuron.beta_list(task.n_hidden) if neuron.adaptive else 0.0,   # per-neuron (mixed LIF/ALIF)
         rho=neuron.rho if neuron.adaptive else 0.0,
     )
     return ds.data, ds.targets, ds

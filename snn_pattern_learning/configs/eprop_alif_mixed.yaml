@@ -1,0 +1,60 @@
+# Mixed LIF/ALIF hidden population (Bellec-2020 LSNN style): the LAST n_adaptive
+# hidden neurons are adaptive with `beta`, the others are plain LIF. Alternatively
+# give `beta` as a per-neuron list (e.g. [0, 0, 0.5, 0.5]) instead of n_adaptive.
+# The teacher gets the same per-neuron beta, so the task stays realizable.
+#   python main_unified.py --config eprop_alif_mixed.yaml
+experiment:
+  type: "basic"
+  name: "eprop_alif_mixed_n2"
+  save_results: true
+  results_dir: "results/eprop_alif"
+
+model:
+  type: "EpropRSNN"
+  n_in: 10
+  n_hidden: 4
+  n_out: 4
+  recurrent: true
+  init_tau: 0.6
+  init_thresh: 0.4
+  init_tau_o: 0.6
+  weight_scale: 0.5
+  learning_rule: "eprop"
+  neuron:
+    kind: "alif"
+    beta: 0.5
+    n_adaptive: 2        # hidden neurons 2,3 adaptive; 0,1 LIF
+    rho: 0.9
+  grad_chain:
+    eligibility: "full"  # full | truncated (only the ALIF rows differ)
+  hardware:
+    enabled: false
+
+dataset:
+  type: "CustomSpikeDataset_Teacher"
+  num_samples: 1
+  sequence_length: 20
+  spike_prob: 0.2
+  seed: 25
+  w_scale: 1.5
+
+training:
+  batch_size: 1
+  learning_rate: 0.05
+  epochs: 50
+  optimizer: "Adam"
+  init_seed: 0
+
+kernel:
+  size: 3
+  decay_rate: 2.0
+
+logging:
+  enable_logger: false
+  enable_pattern_analyzer: false
+  save_plots: true
+  plot_format: "png"
+  log_level: "INFO"
+
+wandb:
+  enabled: false

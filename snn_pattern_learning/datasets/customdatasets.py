@@ -791,7 +791,14 @@ class CustomSpikeDataset_Teacher(Dataset):
         # teacher and is bit-identical to the pre-2026-08-26 behaviour.
         super().__init__()
         import torch as _torch
-        self.beta, self.rho = float(beta), float(rho)
+        # beta: float (shared) or per-hidden-neuron list (mixed LIF/ALIF; 0 = LIF)
+        if isinstance(beta, (list, tuple)):
+            assert len(beta) == hidden_size, "beta list must have hidden_size entries"
+            self.beta_vec = _torch.tensor([float(b) for b in beta])
+        else:
+            self.beta_vec = _torch.full((hidden_size,), float(beta))
+        self.beta = float(self.beta_vec.abs().max())      # 0 -> plain LIF teacher
+        self.rho = float(rho)
 
         g = _torch.Generator().manual_seed(seed)
         self.data = (_torch.rand(num_samples, sequence_length, input_size,
@@ -821,7 +828,7 @@ class CustomSpikeDataset_Teacher(Dataset):
                 I = self.data[:, t, :] @ w_in + z @ w_rec
                 v = teacher_tau * v * (1 - z) + I
                 if self.beta != 0.0:
-                    A = teacher_thresh + self.beta * a
+                    A = teacher_thresh + self.beta_vec * a      # per-neuron beta (0 = LIF)
                     z = (v > A).float()
                     a = self.rho * a + z
                 else:

@@ -95,11 +95,14 @@ def pseudo_derivative(v: Tensor, A, thresh: float, gain: float) -> Tensor:
     return gain * torch.max(torch.zeros_like(v), 1 - torch.abs((v - A) / thresh))
 
 
-def alif_threshold(thresh: float, beta: float, a: Tensor):
-    """Effective threshold ``A_t = thresh + beta * a_t`` (returns float if beta==0)."""
-    if beta == 0.0:
+def alif_threshold(thresh: float, beta, a: Tensor):
+    """Effective threshold ``A_t = thresh + beta * a_t``.
+
+    ``beta`` is a float (shared) or a ``(H,)`` tensor (per neuron; 0 entries are
+    plain LIF neurons). Returns the float ``thresh`` when beta is exactly 0."""
+    if not torch.is_tensor(beta) and beta == 0.0:
         return thresh
-    return thresh + beta * a
+    return thresh + beta * a                      # (H,) broadcasts over (B, H)
 
 
 def alif_adapt(a: Tensor, z: Tensor, rho: float) -> Tensor:
@@ -119,8 +122,11 @@ def eligibility_alif(h: Tensor, eps_v: Tensor, eps_a: Tensor, beta: float, rho: 
         e_{ji}^t       = h_j^t * (eps_v_i^t - beta * eps_a_{ji}^t)
         eps_a_{ji}^{t+1} = h_j^t * eps_v_i^t + (rho - h_j^t * beta) * eps_a_{ji}^t
 
+    ``beta`` may be a float or a per-neuron ``(H,)`` tensor (mixed LIF/ALIF
+    population: rows with beta=0 reduce exactly to the LIF eligibility).
     Returns ``(e, eps_a_next)``; both (B, post, pre)."""
     hv = torch.einsum("br,bi->bri", h, eps_v)
-    e = hv - beta * h.unsqueeze(2) * eps_a
-    eps_a_next = hv + (rho - beta * h).unsqueeze(2) * eps_a
+    bh = (beta * h).unsqueeze(2)                  # (B, H, 1); beta (H,) broadcasts over B
+    e = hv - bh * eps_a
+    eps_a_next = hv + (rho - bh) * eps_a
     return e, eps_a_next
