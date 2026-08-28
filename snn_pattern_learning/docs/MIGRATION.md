@@ -71,6 +71,10 @@ python main_unified.py --config eprop_alif_digital.yaml      # ALIF, model.type:
 python scripts/teacher_student/run_alif_conditions.py --betas 0 0.5 1.0 --seeds 0 1 2 3 4
 python scripts/teacher_student/run_alif_conditions.py --conditions analog --mock   # or --port COM4
 
+# run registry (results/registry.jsonl; every sweep script and main_unified append to it)
+python scripts/analysis/registry_table.py --task teacher_student --group condition neuron.kind chain.eligibility
+python scripts/analysis/registry_table.py --list --latest-only
+
 # device measurements
 python -m hardware.measure.run --list
 python -m hardware.measure.run 03_read_disturbance/fit_read_disturb_modelB.py

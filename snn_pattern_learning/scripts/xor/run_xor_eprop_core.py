@@ -61,7 +61,7 @@ def main():
         lr = args.lr_bptt if cond == "bptt" else args.lr
         r = run_xor(cond, args.epochs, lr, seed=seed, neuron=neuron, chain=chain, hw=hw,
                     reservoir=(mode == "reservoir"), bptt_halfwidth=args.bptt_halfwidth,
-                    verbose=args.verbose)
+                    verbose=args.verbose, record=True, curves_path=args.out, note="run_xor_eprop_core")
         r.update(kind=kind, eligibility=elig if kind == "alif" else "-", mode=mode if cond != "bptt" else "-")
         rows.append(r)
         fp = r["first_perfect_epoch"]

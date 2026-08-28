@@ -11,6 +11,12 @@ if PKG_ROOT not in sys.path:
 
 os.environ.setdefault("MPLBACKEND", "Agg")
 
+# Never let tests append to the real run registry (results/registry.jsonl):
+# point $SNN_REGISTRY at a throw-away file for the whole session (subprocesses
+# started by the pipeline tests inherit it).
+import tempfile  # noqa: E402
+os.environ["SNN_REGISTRY"] = os.path.join(tempfile.mkdtemp(prefix="snn_registry_test_"), "registry.jsonl")
+
 
 @pytest.fixture(autouse=True)
 def _cpu_threads():

@@ -30,22 +30,30 @@ joint/reservoir in all three.
 A **large refactor is not needed**; the core is already config-driven and
 tested. Three specific gaps remain, in order of value:
 
-### 1. Run registry (recommended, small)
-Every sweep writes its own JSON with its own schema (`run_alif_conditions`,
-`run_xor_eprop_core`, legacy `sweep_teacher_student` registry, `main_unified`
-result folders). Comparing across them means ad-hoc scripts. Proposal:
+### 1. Run registry — IMPLEMENTED (2026-08-28)
+`eprop/registry.py` appends one JSON line per run to `results/registry.jsonl`
+(override with `$SNN_REGISTRY`; the test-suite always points it at a temp file).
+Stable schema: `run_id` (sha1 of the resolved task/condition/neuron/chain/hw/
+train_hidden/seed/epochs/lr — identical settings ⇒ identical id), timestamp,
+`git_commit`, `entry_point`, `task`, `condition`, resolved config dicts,
+`metrics` (best_loss, best_epoch, best_acc, first_perfect_epoch, fidelity_mean,
+…), `curves_path` (the sweep JSON / results dir holding the full curves),
+`seconds`, `note`; `main_unified` entries also carry a per-epoch `history`.
 
-* `eprop/registry.py`: `record(run: dict, path="results/registry.jsonl")` that
-  appends one JSON line per run with a **stable schema**: `run_id` (hash of the
-  resolved config), timestamp, git commit, `task`, `condition`, resolved
-  `NeuronConfig`/`GradChainConfig`/`HardwareReadoutConfig`/`TaskConfig`,
-  `train_hidden`, `seed`, `epochs`, `lr`, metrics (`best_loss`, `best_epoch`,
-  `best_acc`, `first_perfect_epoch`, `fidelity` summary), and a pointer to the
-  full curve file.
-* All three entry points call it (one line each). `main_unified` gets it in
-  `BasicExperiment.save_results`.
-* `scripts/analysis/registry_table.py`: group-by / filter → markdown table.
-  This replaces the per-sweep summary printers.
+Hooks: `run_condition(..., record=True, curves_path=...)`,
+`run_xor(..., record=True, ...)` (both sweep scripts pass these),
+`main_unified` (always, unless `experiment.registry: false`).
+
+Query:
+```
+python scripts/analysis/registry_table.py --task xor --group condition neuron.kind train_hidden \
+    --metrics metrics.best_acc metrics.first_perfect_epoch --agg mean
+python scripts/analysis/registry_table.py --filter neuron.kind=alif --filter chain.eligibility=full --list
+python scripts/analysis/registry_table.py --latest-only          # newest entry per run_id
+```
+or in Python: `registry.load(task="xor", **{"neuron.kind": "alif"})`,
+`registry.table(rows, group=[...], metrics=[...])`.
+The legacy per-sweep JSONs remain the curve store; the registry is the index.
 
 ### 2. One task interface (recommended, medium)
 `run_condition` (teacher–student) and `run_xor` duplicate the epoch loop and

@@ -71,10 +71,13 @@ def run_condition(condition: str, epochs: int, lr: float, seed: int = 0,
                   chain: Optional[GradChainConfig] = None,
                   hw: Optional[HardwareReadoutConfig] = None, interface=None,
                   verbose: bool = False, init_from: Optional[torch.nn.Module] = None,
-                  train_hidden: bool = True) -> Dict:
+                  train_hidden: bool = True, record: bool = False,
+                  curves_path: Optional[str] = None, note: str = "") -> Dict:
     """``train_hidden=False`` = reservoir mode (fc1/recurrent frozen at init, only the
     readout learns) -- the same switch as ``eprop.xor.run_xor(reservoir=True)`` and
-    the yaml key ``training.train_hidden``."""
+    the yaml key ``training.train_hidden``. ``record=True`` appends a summary line to
+    the run registry (``eprop.registry``); ``curves_path`` names the file that holds
+    the full curves (usually the sweep JSON)."""
     task = task or TaskConfig()
     neuron = neuron or NeuronConfig()
     chain = chain or GradChainConfig()
@@ -135,14 +138,26 @@ def run_condition(condition: str, epochs: int, lr: float, seed: int = 0,
         if condition == "analog":
             m.disconnect_hardware()
 
-    return dict(condition=condition, losses=losses, vrds=vrds, best_loss=best[0],
-                best_epoch=best[2], fidelity=fidelity,
-                final_spikes=best[1][0].numpy().tolist() if best[1] is not None else None,
-                target_spikes=tgt[0].numpy().tolist(), input_spikes=x[0].numpy().tolist(),
-                seconds=time.time() - t0,
-                config=dict(task=task.__dict__, neuron=neuron.__dict__, chain=chain.__dict__,
-                            hw=(hw.__dict__ if hw else None), epochs=epochs, lr=lr, seed=seed,
-                            train_hidden=train_hidden))
+    result = dict(condition=condition, losses=losses, vrds=vrds, best_loss=best[0],
+                  best_epoch=best[2], fidelity=fidelity,
+                  final_spikes=best[1][0].numpy().tolist() if best[1] is not None else None,
+                  target_spikes=tgt[0].numpy().tolist(), input_spikes=x[0].numpy().tolist(),
+                  seconds=time.time() - t0,
+                  config=dict(task=task.__dict__, neuron=neuron.__dict__, chain=chain.__dict__,
+                              hw=(hw.__dict__ if hw else None), epochs=epochs, lr=lr, seed=seed,
+                              train_hidden=train_hidden))
+    if record:
+        from . import registry
+        fid = [f for f in fidelity if f == f]
+        metrics = dict(best_loss=best[0], best_epoch=best[2], final_loss=losses[-1], final_vrd=vrds[-1],
+                       fidelity_mean=(sum(fid) / len(fid)) if fid else None,
+                       fidelity_min=min(fid) if fid else None)
+        result["registry_path"] = registry.record(registry.make_entry(
+            entry_point="run_condition", task="teacher_student", condition=condition,
+            neuron=neuron, chain=chain, hw=hw if condition == "analog" else None, task_cfg=task,
+            train_hidden=train_hidden, seed=seed, epochs=epochs, lr=lr, metrics=metrics,
+            curves_path=curves_path, seconds=result["seconds"], note=note))
+    return result
 
 
 def run_experiment(cfg: ExperimentConfig, condition: str, **kw) -> Dict:

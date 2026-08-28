@@ -74,7 +74,8 @@ def main():
         if cond == "analog":
             hw.grad_log_path = os.path.splitext(args.out)[0] + f"_grad_b{beta}_{elig}_s{seed}.csv"
         r = run_condition(cond, args.epochs, args.lr, seed=seed, task=task, neuron=neuron,
-                          chain=chain, hw=hw if cond == "analog" else None, verbose=args.verbose)
+                          chain=chain, hw=hw if cond == "analog" else None, verbose=args.verbose,
+                          record=True, curves_path=args.out, note="run_alif_conditions")
         r.update(beta=beta, eligibility=elig, seed=seed)
         results.append(r)
         print(f"[{i:3d}/{len(combos)}] beta={beta:<4} {elig:<9} {cond:>11} seed={seed}"
