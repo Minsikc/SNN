@@ -16,6 +16,7 @@ from .model import EpropRSNN
 from .readout import HardwareReadout, ReadoutBackend, SoftwareReadout
 from .tasks import build_teacher_task, planted_teacher_loss
 from .train import CONDITIONS, build_model, run_condition, run_experiment, sequence_loss
+from .xor import XOR_CONDITIONS, run_xor, xor_neuron
 
 __all__ = [
     "ExperimentConfig", "GradChainConfig", "HardwareReadoutConfig", "NeuronConfig", "TaskConfig",
