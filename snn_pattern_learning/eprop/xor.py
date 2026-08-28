@@ -64,7 +64,8 @@ def run_xor(condition: str, epochs: int = 60, lr: float = 0.15, seed: int = 0,
             neuron: Optional[NeuronConfig] = None, chain: Optional[GradChainConfig] = None,
             hw: Optional[HardwareReadoutConfig] = None, reservoir: bool = True,
             bptt_halfwidth: float = 0.5, n_hidden: int = 5, ds_kw: Optional[dict] = None,
-            verbose: bool = False, interface=None) -> Dict:
+            verbose: bool = False, interface=None, record: bool = False,
+            curves_path: Optional[str] = None, note: str = "") -> Dict:
     if condition not in XOR_CONDITIONS:
         raise ValueError(f"condition must be one of {XOR_CONDITIONS}")
     neuron = neuron or xor_neuron()
@@ -136,11 +137,26 @@ def run_xor(condition: str, epochs: int = 60, lr: float = 0.15, seed: int = 0,
             model.disconnect_hardware()
 
     first_perfect = next((i + 1 for i, a in enumerate(accs) if a >= 1.0), None)
-    return dict(condition=condition, epochs=epochs, lr=lr, seed=seed, reservoir=reservoir,
-                neuron=neuron.__dict__, chain=chain.__dict__,
-                losses=losses, accs=accs, fidelity=fidelity,
-                best_loss=best[0], best_acc=best[1], best_epoch=best[3] + 1,
-                first_perfect_epoch=first_perfect, n_perfect_epochs=sum(a >= 1.0 for a in accs),
-                final_acc=accs[-1], mean_acc=sum(accs) / len(accs),
-                best_outputs=best[2].numpy().tolist() if best[2] is not None else None,
-                seconds=time.time() - t0)
+    result = dict(condition=condition, epochs=epochs, lr=lr, seed=seed, reservoir=reservoir,
+                  neuron=neuron.__dict__, chain=chain.__dict__,
+                  losses=losses, accs=accs, fidelity=fidelity,
+                  best_loss=best[0], best_acc=best[1], best_epoch=best[3] + 1,
+                  first_perfect_epoch=first_perfect, n_perfect_epochs=sum(a >= 1.0 for a in accs),
+                  final_acc=accs[-1], mean_acc=sum(accs) / len(accs),
+                  best_outputs=best[2].numpy().tolist() if best[2] is not None else None,
+                  seconds=time.time() - t0)
+    if record:
+        from . import registry
+        fid = [f for f in fidelity if f == f]
+        metrics = dict(best_loss=best[0], best_acc=best[1], best_epoch=best[3] + 1,
+                       first_perfect_epoch=first_perfect, n_perfect_epochs=result["n_perfect_epochs"],
+                       final_acc=accs[-1], mean_acc=result["mean_acc"],
+                       fidelity_mean=(sum(fid) / len(fid)) if fid else None)
+        result["registry_path"] = registry.record(registry.make_entry(
+            entry_point="run_xor", task="xor", condition=condition, neuron=neuron, chain=chain,
+            hw=model.readout.cfg if model.hw_enabled else None,
+            task_cfg=dict(n_hidden=n_hidden, bptt_halfwidth=bptt_halfwidth, **(ds_kw or {})),
+            train_hidden=(True if condition == "bptt" else not reservoir),   # BPTT always trains all weights
+            seed=seed, epochs=epochs, lr=lr, metrics=metrics,
+            curves_path=curves_path, seconds=result["seconds"], note=note))
+    return result
