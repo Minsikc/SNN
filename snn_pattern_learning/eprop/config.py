@@ -7,7 +7,7 @@ Defaults reproduce the legacy ``Basic_RSNN_eprop_forward`` /
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Optional, Tuple
+from typing import List, Optional, Sequence, Tuple, Union
 
 
 @dataclass
@@ -22,8 +22,14 @@ class NeuronConfig:
     thresh: firing threshold (legacy ``init_thresh``); also the
             pseudo-derivative half-width.
     tau_o:  ``kappa`` -- readout / eligibility low-pass constant (``init_tau_o``).
-    beta:   ALIF adaptation strength (0 -> plain LIF even when kind="alif").
-    rho:    ALIF adaptation decay ``exp(-dt / tau_a)``.
+    beta:   ALIF adaptation strength. A scalar applies to every hidden neuron
+            (or, with ``n_adaptive``, to the adaptive ones); a list gives one
+            value per hidden neuron (0 -> that neuron is a plain LIF). Mixed
+            LIF/ALIF populations (Bellec 2020 LSNN) are therefore just a beta
+            vector with zeros.
+    n_adaptive: convenience for mixed populations: the LAST ``n_adaptive``
+            hidden neurons get ``beta``, the others 0. None -> all neurons.
+    rho:    ALIF adaptation decay ``exp(-dt / tau_a)`` (shared).
     pd_gamma: pseudo-derivative height; None -> ``tau`` (legacy quirk, kept
             for reproducibility).
     """
@@ -31,14 +37,23 @@ class NeuronConfig:
     tau: float = 0.6
     thresh: float = 0.4
     tau_o: float = 0.6
-    beta: float = 0.0
+    beta: Union[float, Sequence[float]] = 0.0
+    n_adaptive: Optional[int] = None
     rho: float = 0.9
     pd_gamma: Optional[float] = None
 
     def __post_init__(self):
         if self.kind not in ("lif", "alif"):
             raise ValueError(f"neuron kind must be 'lif' or 'alif', got {self.kind!r}")
-        if self.kind == "lif" and self.beta != 0.0:
+        if isinstance(self.beta, (list, tuple)):
+            self.beta = [float(b) for b in self.beta]
+            if self.n_adaptive is not None:
+                raise ValueError("give either a beta list or n_adaptive, not both")
+        else:
+            self.beta = float(self.beta)
+        if self.n_adaptive is not None and self.n_adaptive < 0:
+            raise ValueError("n_adaptive must be >= 0")
+        if self.kind == "lif" and self.any_beta:
             raise ValueError("beta must be 0 for kind='lif' (use kind='alif')")
 
     @property
@@ -46,8 +61,30 @@ class NeuronConfig:
         return self.tau if self.pd_gamma is None else self.pd_gamma
 
     @property
+    def any_beta(self) -> bool:
+        b = self.beta
+        return any(x != 0.0 for x in b) if isinstance(b, list) else (b != 0.0 and self.n_adaptive != 0)
+
+    @property
     def adaptive(self) -> bool:
-        return self.kind == "alif" and self.beta != 0.0
+        """True if at least one hidden neuron has a non-zero beta."""
+        return self.kind == "alif" and self.any_beta
+
+    def beta_list(self, n_hidden: int) -> List[float]:
+        """Per-neuron beta (length n_hidden); zeros for LIF neurons."""
+        if isinstance(self.beta, list):
+            if len(self.beta) != n_hidden:
+                raise ValueError(f"beta list has {len(self.beta)} entries, n_hidden={n_hidden}")
+            return list(self.beta) if self.kind == "alif" else [0.0] * n_hidden
+        if self.kind != "alif":
+            return [0.0] * n_hidden
+        if self.n_adaptive is None:
+            return [self.beta] * n_hidden
+        n = min(self.n_adaptive, n_hidden)
+        return [0.0] * (n_hidden - n) + [self.beta] * n
+
+    def adaptive_mask(self, n_hidden: int) -> List[bool]:
+        return [b != 0.0 for b in self.beta_list(n_hidden)]
 
 
 @dataclass

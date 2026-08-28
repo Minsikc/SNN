@@ -70,7 +70,11 @@ def run_condition(condition: str, epochs: int, lr: float, seed: int = 0,
                   task: Optional[TaskConfig] = None, neuron: Optional[NeuronConfig] = None,
                   chain: Optional[GradChainConfig] = None,
                   hw: Optional[HardwareReadoutConfig] = None, interface=None,
-                  verbose: bool = False, init_from: Optional[torch.nn.Module] = None) -> Dict:
+                  verbose: bool = False, init_from: Optional[torch.nn.Module] = None,
+                  train_hidden: bool = True) -> Dict:
+    """``train_hidden=False`` = reservoir mode (fc1/recurrent frozen at init, only the
+    readout learns) -- the same switch as ``eprop.xor.run_xor(reservoir=True)`` and
+    the yaml key ``training.train_hidden``."""
     task = task or TaskConfig()
     neuron = neuron or NeuronConfig()
     chain = chain or GradChainConfig()
@@ -80,11 +84,16 @@ def run_condition(condition: str, epochs: int, lr: float, seed: int = 0,
         m.copy_weights_from(init_from)
     kernel = create_exponential_kernel(KERNEL_SIZE, KERNEL_DECAY)
 
+    params = list(m.parameters())
     if condition == "frozen_wout":
         params = [p for n, p in m.named_parameters() if not n.startswith("out.")]
-    else:
-        params = list(m.parameters())
-    opt = torch.optim.Adam(params, lr=lr)
+    if not train_hidden:
+        if condition == "bptt":
+            raise ValueError("train_hidden=False (reservoir) is an e-prop option; BPTT trains all weights")
+        params = [p for n, p in m.named_parameters() if n.startswith("out.")]
+        if condition in ("frozen_wout", "analog"):
+            params = []                      # readout is frozen / written by the array
+    opt = torch.optim.Adam(params, lr=lr) if params else None
 
     if condition == "analog":
         if not m.connect_hardware():
@@ -97,14 +106,16 @@ def run_condition(condition: str, epochs: int, lr: float, seed: int = 0,
         for ep in range(epochs):
             if condition == "analog":
                 m.reset_hardware()
-            opt.zero_grad()
+            if opt is not None:
+                opt.zero_grad()
             out = m(x, tgt, training=True)
             loss = sequence_loss(out, tgt, kernel)
             if condition == "bptt":
                 loss.backward()
             if condition == "frozen_wout" and m.out.weight.grad is not None:
                 m.out.weight.grad.zero_()
-            opt.step()
+            if opt is not None:
+                opt.step()
             if condition == "analog":
                 m.apply_hw_gradient(learning_rate=lr)
                 fidelity.append(m.readout.last_stats.get("corr", float("nan")))
@@ -130,7 +141,8 @@ def run_condition(condition: str, epochs: int, lr: float, seed: int = 0,
                 target_spikes=tgt[0].numpy().tolist(), input_spikes=x[0].numpy().tolist(),
                 seconds=time.time() - t0,
                 config=dict(task=task.__dict__, neuron=neuron.__dict__, chain=chain.__dict__,
-                            hw=(hw.__dict__ if hw else None), epochs=epochs, lr=lr, seed=seed))
+                            hw=(hw.__dict__ if hw else None), epochs=epochs, lr=lr, seed=seed,
+                            train_hidden=train_hidden))
 
 
 def run_experiment(cfg: ExperimentConfig, condition: str, **kw) -> Dict:

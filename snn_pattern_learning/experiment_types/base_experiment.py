@@ -105,6 +105,18 @@ class BaseExperiment(ABC):
         return model.to(self.device)
     
     
+    def _teacher_adaptation_kwargs(self):
+        """ALIF parameters for CustomSpikeDataset_Teacher, matching the student
+        (model.type EpropRSNN with model.neuron.{kind,beta,n_adaptive,rho}).
+        Legacy model types / LIF -> beta 0 (bit-identical to the old teacher)."""
+        ncfg = self.config.get('model.neuron', {}) or {}
+        if ncfg.get('kind', 'lif') != 'alif':
+            return dict(beta=0.0, rho=0.9)
+        from eprop.config import neuron_from_dict
+        neuron = neuron_from_dict(dict(ncfg))
+        n_hidden = self.config.get('model.n_hidden', 5)
+        return dict(beta=neuron.beta_list(n_hidden) if neuron.adaptive else 0.0, rho=neuron.rho)
+
     def create_dataset(self, train=None):
         """Create dataset based on configuration
 
@@ -145,9 +157,10 @@ class BaseExperiment(ABC):
                 # ALIF teacher (model.type EpropRSNN with model.neuron.kind alif):
                 # the teacher must share the student's adaptation so the task
                 # stays realizable (planted teacher weights -> loss 0)
-                beta=(self.config.get('model.neuron.beta', 0.0)
-                      if self.config.get('model.neuron.kind', 'lif') == 'alif' else 0.0),
-                rho=self.config.get('model.neuron.rho', 0.9),
+                # Resolved through NeuronConfig so scalar beta, a beta list and
+                # n_adaptive (mixed LIF/ALIF) all give the same per-neuron vector
+                # the student uses.
+                **self._teacher_adaptation_kwargs(),
             )
         elif dataset_type == "TemporalXORDataset":
             return TemporalXORDataset(
@@ -211,11 +224,20 @@ class BaseExperiment(ABC):
         """Create optimizer based on configuration"""
         optimizer_type = self.config.get('training.optimizer', 'Adam')
         learning_rate = self.config.get('training.learning_rate', 0.1)
-        
+
+        # training.train_hidden: false -> reservoir mode (fc1/recurrent frozen at
+        # init, only the readout learns). Same switch as eprop.run_condition(
+        # train_hidden=...) and eprop.xor.run_xor(reservoir=...).
+        params = list(model.parameters())
+        if not self.config.get('training.train_hidden', True):
+            params = [p for n, p in model.named_parameters() if n.startswith('out.')]
+            if not params:                       # nothing trainable in software
+                params = [torch.nn.Parameter(torch.zeros(1))]   # dummy so optimizer.step() is a no-op
+
         if optimizer_type == "Adam":
-            return optim.Adam(model.parameters(), lr=learning_rate)
+            return optim.Adam(params, lr=learning_rate)
         elif optimizer_type == "SGD":
-            return optim.SGD(model.parameters(), lr=learning_rate)
+            return optim.SGD(params, lr=learning_rate)
         else:
             raise ValueError(f"Unsupported optimizer type: {optimizer_type}")
     

@@ -96,6 +96,8 @@ dataset:
 | switch | legacy value | note |
 |---|---|---|
 | `NeuronConfig.kind` | `lif` | `alif` adds `A_t = ϑ + β a_t`, `a_{t+1} = ρ a_t + z_t` |
+| `NeuronConfig.beta` / `n_adaptive` | scalar / `None` (all neurons) | mixed LIF/ALIF population: `n_adaptive=k` → last k hidden neurons adaptive, or `beta=[...]` per neuron (0 = LIF). Teacher gets the same vector. `n_adaptive=0` ≡ LIF bit-exact |
+| `train_hidden` (`run_condition(train_hidden=)`, `run_xor(reservoir=)`, yaml `training.train_hidden`) | `True` (joint) | `False` = reservoir: fc1/recurrent frozen at init, only the readout learns |
 | `GradChainConfig.eligibility` | `full` | `truncated` drops `ε_a` (rank-1-mappable); identical for LIF |
 | `GradChainConfig.rec_grad_orientation` | `legacy` (transposed) | `corrected` |
 | `GradChainConfig.bptt_add_eprop` | `False` (pure BPTT) | `True` reproduces paper-v0.1 "bptt" (see INTEGRITY_REPORT §1) |

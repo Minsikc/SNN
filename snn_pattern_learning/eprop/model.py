@@ -136,7 +136,14 @@ class EpropRSNN(nn.Module):
 
         nc, ch = self.neuron, self.chain
         alpha, kappa, thr = nc.tau, nc.tau_o, nc.thresh
-        beta, rho = (nc.beta, nc.rho) if nc.adaptive else (0.0, 0.0)
+        if nc.adaptive:
+            # per-neuron beta (H,): zeros mark plain LIF neurons in a mixed population;
+            # a scalar is kept as a python float so the all-ALIF path stays bit-exact
+            bl = nc.beta_list(self.n_hidden)
+            beta = bl[0] if len(set(bl)) == 1 else torch.tensor(bl, dtype=torch.float32, device=dev)
+            rho = nc.rho
+        else:
+            beta, rho = 0.0, 0.0
         gain = nc.pseudo_derivative_gain
         full_alif = nc.adaptive and ch.eligibility == "full"
         surrogate = ch.bptt_surrogate
